@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets
+.env
+
+# Backtest output
+*.parquet
+data/cache/
+
+# Paper trading state (§8 Phase 1) -- local run state, not source
+paper_state.json
+paper_decisions.jsonl
+
