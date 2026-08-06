@@ -11,6 +11,7 @@ import logging
 import requests
 
 from poly03.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from poly03.logutil import append_log
 
 logger = logging.getLogger("poly03.notify.telegram")
 
@@ -55,6 +56,7 @@ class TelegramReporter:
     def log(self, msg: object = "") -> None:
         msg = str(msg)
         print(msg)
+        append_log(msg)
         if self.enabled:
             self._buffer.append(msg)
 

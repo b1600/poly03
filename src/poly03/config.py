@@ -140,6 +140,7 @@ EARLY_EXIT_ADVERSE_MOVE_CENTS = 8.0
 
 PAPER_STATE_FILE = _env("PAPER_STATE_FILE", "paper_state.json")
 PAPER_DECISION_LOG_FILE = _env("PAPER_DECISION_LOG_FILE", "paper_decisions.jsonl")
+PAPER_TRADE_LOG_FILE = _env("PAPER_TRADE_LOG_FILE", "paper_trade.log")
 PAPER_STARTING_BANKROLL = _env_float("PAPER_STARTING_BANKROLL", 100_000.0)
 
 # doc: "breadth ... 100-300 concurrent positions"

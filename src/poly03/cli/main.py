@@ -21,7 +21,16 @@ from poly03.config import (
 )
 from poly03.data.gamma import GammaClient
 from poly03.filters.exclusion import apply_exclusion_filters
+from poly03.logutil import append_log
 from poly03.scoring.edge_score import EdgeScoreInputs, compute_edge_score
+
+
+def _log(msg: object = "") -> None:
+    """print() that also appends to PAPER_TRADE_LOG_FILE, so console output
+    from every subcommand survives after the terminal/session is gone."""
+    msg = str(msg)
+    print(msg)
+    append_log(msg)
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
@@ -79,28 +88,28 @@ def cmd_scan(args: argparse.Namespace) -> None:
             continue
 
         found += 1
-        print(
+        _log(
             f"[T{classification.tier.value}] {market.question[:70]:70} "
             f"price={maker_price:.3f} days={days:6.1f} "
             f"roc={result.annualized_roc:+7.1%} edge={result.edge_score:+.3f}"
         )
-        print(f"       evidence: {classification.evidence[0]}")
+        _log(f"       evidence: {classification.evidence[0]}")
 
-    print(f"\nscanned {scanned} markets, {found} tradeable Book A candidates found")
+    _log(f"\nscanned {scanned} markets, {found} tradeable Book A candidates found")
 
 
 def cmd_backtest(args: argparse.Namespace) -> None:
     from poly03.backtest.engine import run_phase0_backtest
 
-    print(f"running Phase 0 backtest over up to {args.max_markets} closed markets (this hits the CLOB API a lot)...")
+    _log(f"running Phase 0 backtest over up to {args.max_markets} closed markets (this hits the CLOB API a lot)...")
     report = run_phase0_backtest(max_markets=args.max_markets, page_size=args.page_size)
 
-    print(f"\ntotal candidates found: {len(report.candidates)}")
-    print(f"tradeable (passed filters, tier != 4, in Book A price band): {len(report.tradeable)}")
+    _log(f"\ntotal candidates found: {len(report.candidates)}")
+    _log(f"tradeable (passed filters, tier != 4, in Book A price band): {len(report.tradeable)}")
 
-    print("\ncalibration by tier (§7 -- the single most important number):")
+    _log("\ncalibration by tier (§7 -- the single most important number):")
     for bucket in report.calibration_by_tier():
-        print(
+        _log(
             f"  Tier {bucket.tier.value}: n={bucket.n:4d}  "
             f"mean_entry_price={bucket.mean_entry_price:.3f}  "
             f"realized_win_rate={bucket.realized_win_rate:.1%}  "
@@ -108,21 +117,21 @@ def cmd_backtest(args: argparse.Namespace) -> None:
         )
 
     brier = report.overall_brier()
-    print(f"\noverall Brier score: {brier:.4f}" if brier is not None else "\noverall Brier score: n/a (no tradeable candidates)")
+    _log(f"\noverall Brier score: {brier:.4f}" if brier is not None else "\noverall Brier score: n/a (no tradeable candidates)")
 
     roc = report.realized_vs_modeled_roc()
     if roc:
         modeled, realized = roc
-        print(f"mean modeled annualized ROC:  {modeled:+.1%}")
-        print(f"mean realized annualized ROC: {realized:+.1%}")
+        _log(f"mean modeled annualized ROC:  {modeled:+.1%}")
+        _log(f"mean realized annualized ROC: {realized:+.1%}")
 
     misses = report.tier1_misses()
-    print(f"\nTier 1 misses (kill-switch trigger if any): {len(misses)}")
+    _log(f"\nTier 1 misses (kill-switch trigger if any): {len(misses)}")
     for m in misses:
-        print(f"  BROKEN CLASSIFIER: {m.question[:70]} (side={m.side}, entry={m.entry_price:.3f})")
+        _log(f"  BROKEN CLASSIFIER: {m.question[:70]} (side={m.side}, entry={m.entry_price:.3f})")
 
     rejected = report.counterfactual_rejected()
-    print(f"\ncounterfactual: {len(rejected)} candidates rejected by exclusion filters")
+    _log(f"\ncounterfactual: {len(rejected)} candidates rejected by exclusion filters")
 
 
 def cmd_paper_tick(args: argparse.Namespace) -> None:
@@ -131,38 +140,38 @@ def cmd_paper_tick(args: argparse.Namespace) -> None:
 
     state = load_state(args.state_file)
     if state.manual_review_required and not args.force:
-        print("HALTED: manual_review_required is set (a Tier 1 position resolved against us).")
-        print("Investigate the classifier before continuing. Re-run with --force to tick anyway.")
+        _log("HALTED: manual_review_required is set (a Tier 1 position resolved against us).")
+        _log("Investigate the classifier before continuing. Re-run with --force to tick anyway.")
         return
 
     report = run_tick(state, max_markets=args.max_markets, decision_log_path=args.log_file)
     save_state(state, args.state_file)
 
-    print(f"tick @ {report.timestamp}")
-    print(f"  scanned={report.scanned} candidates={report.candidates_found}")
-    print(f"  entered={len(report.entered)} exited={len(report.exited)} (win={report.resolved_win} loss={report.resolved_loss})")
-    print(f"  cash=${report.cash:,.2f} equity=${report.equity:,.2f}")
+    _log(f"tick @ {report.timestamp}")
+    _log(f"  scanned={report.scanned} candidates={report.candidates_found}")
+    _log(f"  entered={len(report.entered)} exited={len(report.exited)} (win={report.resolved_win} loss={report.resolved_loss})")
+    _log(f"  cash=${report.cash:,.2f} equity=${report.equity:,.2f}")
     if report.halted:
-        print(f"  HALTED: {'; '.join(report.halt_reasons) or 'manual review required'}")
+        _log(f"  HALTED: {'; '.join(report.halt_reasons) or 'manual review required'}")
 
 
 def cmd_paper_status(args: argparse.Namespace) -> None:
     from poly03.paper.state import load_state
 
     state = load_state(args.state_file)
-    print(f"bankroll (start): ${state.bankroll:,.2f}")
-    print(f"equity (cash + open stake basis): ${state.equity:,.2f}")
-    print(f"cash: ${state.cash:,.2f}")
-    print(f"high-water mark: ${state.high_water_mark:,.2f}")
-    print(f"open positions: {len(state.open_positions)}  closed positions: {len(state.closed_positions)}")
-    print(f"ticks run: {state.n_ticks}")
+    _log(f"bankroll (start): ${state.bankroll:,.2f}")
+    _log(f"equity (cash + open stake basis): ${state.equity:,.2f}")
+    _log(f"cash: ${state.cash:,.2f}")
+    _log(f"high-water mark: ${state.high_water_mark:,.2f}")
+    _log(f"open positions: {len(state.open_positions)}  closed positions: {len(state.closed_positions)}")
+    _log(f"ticks run: {state.n_ticks}")
     if state.halted or state.manual_review_required:
-        print(f"HALTED: {'; '.join(state.halt_reasons)}")
+        _log(f"HALTED: {'; '.join(state.halt_reasons)}")
         if state.manual_review_required:
-            print("MANUAL REVIEW REQUIRED (Tier 1 miss)")
+            _log("MANUAL REVIEW REQUIRED (Tier 1 miss)")
 
 
-def cmd_paper_report(args: argparse.Namespace, log=print) -> None:
+def cmd_paper_report(args: argparse.Namespace, log=_log) -> None:
     from poly03.paper import measurement as m
     from poly03.paper.state import load_state
 
@@ -213,7 +222,7 @@ def cmd_paper_reset(args: argparse.Namespace) -> None:
     state = PaperState(bankroll=bankroll, cash=bankroll, high_water_mark=bankroll)
     save_state(state, args.state_file)
     Path(args.log_file).unlink(missing_ok=True)
-    print(f"paper state reset: bankroll=${bankroll:,.2f}  state_file={args.state_file}")
+    _log(f"paper state reset: bankroll=${bankroll:,.2f}  state_file={args.state_file}")
 
 
 def cmd_paper_run(args: argparse.Namespace) -> None:
@@ -230,7 +239,7 @@ def cmd_paper_run(args: argparse.Namespace) -> None:
     logger = logging.getLogger("poly03.paper")
     notifier = TelegramReporter()
     if not notifier.enabled:
-        print("(Telegram not configured -- set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID in .env to mirror this output there)")
+        _log("(Telegram not configured -- set TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID in .env to mirror this output there)")
 
     path = Path(args.state_file)
     if path.exists():
@@ -306,7 +315,7 @@ def cmd_montecarlo(args: argparse.Namespace) -> None:
         cluster_stress_loss_fraction=args.cluster_stress_loss_fraction,
         rng_seed=args.seed,
     )
-    print(result.summary())
+    _log(result.summary())
 
 
 def build_parser() -> argparse.ArgumentParser:

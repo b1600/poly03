@@ -19,4 +19,5 @@ data/cache/
 # Paper trading state (§8 Phase 1) -- local run state, not source
 paper_state.json
 paper_decisions.jsonl
+paper_trade.log
 
