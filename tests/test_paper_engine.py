@@ -13,11 +13,14 @@ class FakeGamma:
     def __init__(self, markets):
         self.markets = {m.id: m for m in markets}
 
-    def iter_markets_with_event_context(self, **kwargs):
+    def iter_markets(self, **kwargs):
         yield from list(self.markets.values())
 
     def get_market(self, market_id):
         return self.markets[market_id]
+
+    def get_event(self, event_id):
+        raise AssertionError("get_event should not be called when market.event_id is unset in tests")
 
 
 def _tier1_market(market_factory, *, market_id="m1", best_bid=0.90, best_ask=0.91, days=100.0):

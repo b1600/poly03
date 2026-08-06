@@ -114,7 +114,13 @@ def scan_universe(
     candidates: list[CandidateInfo] = []
     scanned = 0
 
-    for market in gamma.iter_markets_with_event_context(closed=False, order="volume", ascending=False):
+    # Per-market volume order, not iter_markets_with_event_context's per-event
+    # order: paginating by event volume front-loads the scan on a handful of
+    # mega multi-outcome events (100+ long-shot candidate legs each), which
+    # crowds out the 0.85-0.97 price band entirely before the budget runs out.
+    # Event tags (only needed for cluster tagging at entry) are backfilled
+    # lazily in _enter_new_positions for the few markets that get that far.
+    for market in gamma.iter_markets(closed=False, order="volume", ascending=False):
         if scanned >= max_markets:
             break
         scanned += 1
@@ -323,14 +329,31 @@ def check_kill_switches(state: PaperState) -> tuple[bool, list[str], bool]:
 # --- entries -----------------------------------------------------------------------
 
 
+def _ensure_event_tags(market: Market, gamma: GammaClient, tag_cache: dict[str, list[str]]) -> None:
+    """scan_universe's iter_markets() pass has no event tags attached.
+    Backfill them here, one /events fetch per distinct event_id, only for
+    markets that actually reach entry -- not for all 300 scanned."""
+    if market.tags or not market.event_id:
+        return
+    if market.event_id not in tag_cache:
+        try:
+            tag_cache[market.event_id] = gamma.get_event(market.event_id).tags
+        except Exception as exc:
+            logger.warning("failed to fetch event tags for event=%s: %s", market.event_id, exc)
+            tag_cache[market.event_id] = []
+    market.tags = tag_cache[market.event_id]
+
+
 def _enter_new_positions(
     state: PaperState,
     candidates: list[CandidateInfo],
     cluster_tracker: ClusterExposureTracker,
+    gamma: GammaClient,
     log_path: str,
 ) -> list[str]:
     entered: list[str] = []
     open_market_ids = {p.market_id for p in state.open_positions}
+    tag_cache: dict[str, list[str]] = {}
 
     for cand in candidates:
         if len(entered) >= PAPER_MAX_NEW_POSITIONS_PER_TICK:
@@ -385,6 +408,7 @@ def _enter_new_positions(
             )
             continue
 
+        _ensure_event_tags(market, gamma, tag_cache)
         tags = tag_market(market)
         cluster_tracker.update_bankroll(bankroll)
         breaches = cluster_tracker.would_breach(tags, stake)
@@ -485,7 +509,7 @@ def run_tick(
 
     if not report.halted:
         tracker = _rebuild_cluster_tracker(state)
-        report.entered = _enter_new_positions(state, candidates, tracker, decision_log_path)
+        report.entered = _enter_new_positions(state, candidates, tracker, gamma, decision_log_path)
 
     report.cash = state.cash
     report.equity = state.equity
