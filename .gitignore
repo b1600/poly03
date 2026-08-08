@@ -21,3 +21,7 @@ paper_state.json
 paper_decisions.jsonl
 paper_trade.log
 
+
+# Book M Phase 0 state (strategy_v2.md §4) -- local run state, not source
+making_state.json
+making_decisions.jsonl

@@ -23,6 +23,13 @@ class FakeGamma:
         raise AssertionError("get_event should not be called when market.event_id is unset in tests")
 
 
+def _estimator(q: float = 0.95):
+    """Stand-in for the edge estimator Book A now requires (strategy_v2.md
+    §1.1). Tests that exercise entry have to supply one explicitly -- that is
+    the point of the guard: without it, nothing enters."""
+    return lambda market: q
+
+
 def _tier1_market(market_factory, *, market_id="m1", best_bid=0.90, best_ask=0.91, days=100.0):
     m = market_factory(
         "Will the referendum be held on schedule?",
@@ -41,13 +48,14 @@ def test_scan_universe_finds_tier1_candidate(market_factory, tmp_path):
     gamma = FakeGamma([_tier1_market(market_factory)])
     from poly03.classifier.llm_veto import NoOpVeto
 
-    candidates = scan_universe(
+    candidates, _scanned = scan_universe(
         gamma,
         veto=NoOpVeto(),
         max_markets=10,
         target_size_usd=100.0,
         exclude_market_ids=set(),
         log_path=str(tmp_path / "log.jsonl"),
+        edge_estimator=_estimator(),
     )
     assert len(candidates) == 1
     assert candidates[0].classification.tier == Tier.TIER_1
@@ -57,13 +65,14 @@ def test_scan_universe_rejects_out_of_band_price(market_factory, tmp_path):
     gamma = FakeGamma([_tier1_market(market_factory, best_bid=0.50, best_ask=0.51)])
     from poly03.classifier.llm_veto import NoOpVeto
 
-    candidates = scan_universe(
+    candidates, _scanned = scan_universe(
         gamma,
         veto=NoOpVeto(),
         max_markets=10,
         target_size_usd=100.0,
         exclude_market_ids=set(),
         log_path=str(tmp_path / "log.jsonl"),
+        edge_estimator=_estimator(),
     )
     assert candidates == []
 
@@ -82,13 +91,14 @@ def test_scan_universe_rejects_ambiguous_resolution(market_factory, tmp_path):
     from poly03.classifier.llm_veto import NoOpVeto
 
     log_path = tmp_path / "log.jsonl"
-    candidates = scan_universe(
+    candidates, _scanned = scan_universe(
         gamma,
         veto=NoOpVeto(),
         max_markets=10,
         target_size_usd=100.0,
         exclude_market_ids=set(),
         log_path=str(log_path),
+        edge_estimator=_estimator(),
     )
     assert candidates == []
     logged = log_path.read_text()
@@ -104,6 +114,7 @@ def test_run_tick_enters_a_position(market_factory, tmp_path):
         gamma=gamma,
         clob=object(),
         decision_log_path=str(tmp_path / "log.jsonl"),
+        edge_estimator=_estimator(),
     )
 
     assert len(report.entered) == 1
@@ -120,7 +131,7 @@ def test_run_tick_resolves_winning_position(market_factory, tmp_path):
     state = PaperState(bankroll=100_000.0, cash=100_000.0, high_water_mark=100_000.0)
     log_path = str(tmp_path / "log.jsonl")
 
-    run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path)
+    run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path, edge_estimator=_estimator())
     assert len(state.open_positions) == 1
 
     # simulate the world advancing: market resolves Yes (outcome index 0 wins)
@@ -135,7 +146,7 @@ def test_run_tick_resolves_winning_position(market_factory, tmp_path):
     resolved.id = market.id
     gamma.markets[market.id] = resolved
 
-    report = run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path)
+    report = run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path, edge_estimator=_estimator())
     assert report.resolved_win == 1
     assert state.open_positions == []
     win = state.closed_positions[0]
@@ -149,7 +160,7 @@ def test_run_tick_exits_on_adverse_price_move(market_factory, tmp_path):
     state = PaperState(bankroll=100_000.0, cash=100_000.0, high_water_mark=100_000.0)
     log_path = str(tmp_path / "log.jsonl")
 
-    run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path)
+    run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path, edge_estimator=_estimator())
     assert len(state.open_positions) == 1
 
     # price craters well past the 8c adverse-move threshold
@@ -157,7 +168,7 @@ def test_run_tick_exits_on_adverse_price_move(market_factory, tmp_path):
     dropped.id = market.id
     gamma.markets[market.id] = dropped
 
-    report = run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path)
+    report = run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path, edge_estimator=_estimator())
     assert ("adverse_price_move" in [r for _, r in report.exited])
     assert state.open_positions == []
     exited = state.closed_positions[0]
@@ -171,7 +182,7 @@ def test_run_tick_exits_on_tier_downgrade(market_factory, tmp_path):
     state = PaperState(bankroll=100_000.0, cash=100_000.0, high_water_mark=100_000.0)
     log_path = str(tmp_path / "log.jsonl")
 
-    run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path)
+    run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path, edge_estimator=_estimator())
     assert len(state.open_positions) == 1
 
     # rewrite the market so the rules engine no longer sees a tier-1 signature
@@ -185,7 +196,7 @@ def test_run_tick_exits_on_tier_downgrade(market_factory, tmp_path):
     downgraded.id = market.id
     gamma.markets[market.id] = downgraded
 
-    report = run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path)
+    report = run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path, edge_estimator=_estimator())
     assert ("tier_downgrade" in [r for _, r in report.exited])
     exited = state.closed_positions[0]
     assert exited.close_reason == "tier_downgrade"
@@ -197,14 +208,14 @@ def test_run_tick_exits_on_dispute(market_factory, tmp_path):
     state = PaperState(bankroll=100_000.0, cash=100_000.0, high_water_mark=100_000.0)
     log_path = str(tmp_path / "log.jsonl")
 
-    run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path)
+    run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path, edge_estimator=_estimator())
 
     disputed = _tier1_market(market_factory)
     disputed.id = market.id
     disputed.uma_resolution_statuses = ["disputed"]
     gamma.markets[market.id] = disputed
 
-    report = run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path)
+    report = run_tick(state, gamma=gamma, clob=object(), decision_log_path=log_path, edge_estimator=_estimator())
     assert ("dispute_filed" in [r for _, r in report.exited])
 
 
@@ -256,6 +267,39 @@ def test_max_concurrent_positions_throttles_entries(market_factory, tmp_path, mo
     gamma = FakeGamma([m1, m2])
     state = PaperState(bankroll=100_000.0, cash=100_000.0, high_water_mark=100_000.0)
 
-    report = run_tick(state, gamma=gamma, clob=object(), decision_log_path=str(tmp_path / "log.jsonl"))
+    report = run_tick(state, gamma=gamma, clob=object(), decision_log_path=str(tmp_path / "log.jsonl"), edge_estimator=_estimator())
     assert len(report.entered) == 1
     assert len(state.open_positions) == 1
+
+
+def test_run_tick_refuses_to_enter_without_an_edge_estimate(market_factory, tmp_path):
+    """strategy_v2.md §1.1: with no estimator, Book A must stay flat rather
+    than trade against the placeholder q that made the margin gate a
+    tautology. The rejection has to be logged, not silent."""
+    gamma = FakeGamma([_tier1_market(market_factory)])
+    state = PaperState(bankroll=100_000.0, cash=100_000.0, high_water_mark=100_000.0)
+    log_path = tmp_path / "log.jsonl"
+
+    report = run_tick(state, gamma=gamma, clob=object(), decision_log_path=str(log_path))
+
+    assert report.entered == []
+    assert state.open_positions == []
+    assert "no_edge_estimate_available" in log_path.read_text()
+
+
+def test_run_tick_reports_actual_scan_count_not_the_cap(market_factory, tmp_path):
+    """strategy_v2.md §5.4: report.scanned used to echo max_markets whether or
+    not Gamma returned that many."""
+    gamma = FakeGamma([_tier1_market(market_factory, market_id="m1"), _tier1_market(market_factory, market_id="m2")])
+    state = PaperState(bankroll=100_000.0, cash=100_000.0, high_water_mark=100_000.0)
+
+    report = run_tick(
+        state,
+        gamma=gamma,
+        clob=object(),
+        max_markets=300,
+        decision_log_path=str(tmp_path / "log.jsonl"),
+        edge_estimator=_estimator(),
+    )
+
+    assert report.scanned == 2

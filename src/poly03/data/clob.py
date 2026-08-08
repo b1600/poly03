@@ -97,6 +97,44 @@ class ClobClient:
         except Exception:
             return None
 
+    def iter_sampling_markets(self, *, max_markets: int | None = None) -> Iterable[dict]:
+        """Yield raw CLOB markets from /sampling-markets -- the authoritative
+        list of *reward-eligible* markets, and the universe Book M quotes from
+        (strategy_v2.md §3.1).
+
+        This is the source of truth for reward parameters. Gamma's
+        `clobRewards`/`rewardsMinSize`/`rewardsMaxSpread` fields mirror the
+        same data but are denormalised onto the market payload; here they
+        arrive as one `rewards` block:
+
+            {"rates": [{"rewards_daily_rate": 3, ...}],
+             "min_size": 20, "max_spread": 4.5}
+
+        `max_spread` is in *cents* from the midpoint, `min_size` in shares.
+        Paginated by opaque cursor; "LTE=" is the documented end sentinel.
+        """
+        cursor = ""
+        yielded = 0
+        while True:
+            resp = requests.get(
+                f"{self.host}/sampling-markets",
+                params={"next_cursor": cursor} if cursor else None,
+                timeout=20.0,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            batch = payload.get("data") or []
+            if not batch:
+                return
+            for raw in batch:
+                yield raw
+                yielded += 1
+                if max_markets is not None and yielded >= max_markets:
+                    return
+            cursor = payload.get("next_cursor") or ""
+            if not cursor or cursor == "LTE=":
+                return
+
     def get_price_history(
         self, token_id: str, *, interval: str = "max", fidelity: int = 1440
     ) -> list[tuple[int, float]]:

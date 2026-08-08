@@ -55,7 +55,7 @@ class TelegramReporter:
 
     def log(self, msg: object = "") -> None:
         msg = str(msg)
-        print(msg)
+        print(msg, flush=True)  # unbuffered: this loop is meant to run under nohup/tmux
         append_log(msg)
         if self.enabled:
             self._buffer.append(msg)

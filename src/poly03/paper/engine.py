@@ -39,9 +39,10 @@ from poly03.classifier.llm_veto import LLMClassifierVeto, NoOpVeto
 from poly03.classifier.pipeline import classify_market
 from poly03.classifier.rules import Classification
 from poly03.classifier.taxonomy import Tier
-from poly03.cluster.tagging import ClusterExposureTracker, tag_market
+from poly03.cluster.tagging import ClusterExposureTracker, ensure_event_tags, tag_market
 from poly03.config import (
     BOOK_A_PRICE_BAND,
+    BOOK_A_REQUIRE_EDGE_ESTIMATE,
     EARLY_EXIT_ADVERSE_MOVE_CENTS,
     KILL_DRAWDOWN_FRACTION,
     KILL_LOSS_RATE_MULTIPLE,
@@ -75,6 +76,14 @@ class CandidateInfo:
     maker_price: float
     days: float
     edge: EdgeScoreResult
+    estimated_true_probability: float
+
+
+# An edge estimator maps a Market to P(the outcome we'd buy resolves YES), or
+# to None when it has no opinion. There is no implementation in this repo --
+# that absence is the finding in strategy_v2.md §1.1, not an oversight. Book A
+# stays flat until one exists; see BOOK_A_REQUIRE_EDGE_ESTIMATE.
+EdgeEstimator = "Callable[[Market], float | None]"
 
 
 @dataclass
@@ -107,9 +116,19 @@ def scan_universe(
     target_size_usd: float,
     exclude_market_ids: set[str],
     log_path: str,
-) -> list[CandidateInfo]:
+    edge_estimator=None,
+) -> tuple[list[CandidateInfo], int]:
     """Same pipeline as `poly03 scan`: exclusion filters -> classifier ->
-    edge score. Logs every rejection for the §7 counterfactual log."""
+    edge score. Logs every rejection for the §7 counterfactual log.
+
+    Returns (candidates, markets_actually_scanned). The second element exists
+    because `run_tick` used to report the configured cap as the scan count
+    regardless of what Gamma returned -- strategy_v2.md §5.4.
+
+    `edge_estimator` supplies q. With none, and BOOK_A_REQUIRE_EDGE_ESTIMATE
+    set, every market is rejected as `no_edge_estimate_available` rather than
+    entered against the placeholder q that v1 used (§1.1).
+    """
     lo, hi = BOOK_A_PRICE_BAND
     candidates: list[CandidateInfo] = []
     scanned = 0
@@ -164,7 +183,23 @@ def scan_universe(
         if days is None or days <= 0:
             continue
 
-        q_placeholder = min(0.999, maker_price + MIN_MARGIN_PP)
+        q = edge_estimator(market) if edge_estimator is not None else None
+        if q is None:
+            if BOOK_A_REQUIRE_EDGE_ESTIMATE:
+                log_decision(
+                    {
+                        "kind": "reject",
+                        "market_id": market.id,
+                        "question": market.question,
+                        "reasons": ["no_edge_estimate_available"],
+                    },
+                    path=log_path,
+                )
+                continue
+            # Explicitly opted back into v1's placeholder. Recorded on the
+            # candidate so nothing downstream mistakes it for a real estimate.
+            q = min(0.999, maker_price + MIN_MARGIN_PP)
+
         result = compute_edge_score(
             EdgeScoreInputs(
                 market_id=market.id,
@@ -173,7 +208,7 @@ def scan_universe(
                 confidence_multiplier=classification.confidence_multiplier,
                 target_size_usd=target_size_usd,
                 visible_depth_usd=market.liquidity or 0.0,
-                estimated_true_probability=q_placeholder,
+                estimated_true_probability=q,
             )
         )
         if not result.tradeable:
@@ -190,11 +225,18 @@ def scan_universe(
             continue
 
         candidates.append(
-            CandidateInfo(market=market, classification=classification, maker_price=maker_price, days=days, edge=result)
+            CandidateInfo(
+                market=market,
+                classification=classification,
+                maker_price=maker_price,
+                days=days,
+                edge=result,
+                estimated_true_probability=q,
+            )
         )
 
     candidates.sort(key=lambda c: c.edge.edge_score, reverse=True)
-    return candidates
+    return candidates, scanned
 
 
 # --- §6 position lifecycle --------------------------------------------------------
@@ -329,21 +371,6 @@ def check_kill_switches(state: PaperState) -> tuple[bool, list[str], bool]:
 # --- entries -----------------------------------------------------------------------
 
 
-def _ensure_event_tags(market: Market, gamma: GammaClient, tag_cache: dict[str, list[str]]) -> None:
-    """scan_universe's iter_markets() pass has no event tags attached.
-    Backfill them here, one /events fetch per distinct event_id, only for
-    markets that actually reach entry -- not for all 300 scanned."""
-    if market.tags or not market.event_id:
-        return
-    if market.event_id not in tag_cache:
-        try:
-            tag_cache[market.event_id] = gamma.get_event(market.event_id).tags
-        except Exception as exc:
-            logger.warning("failed to fetch event tags for event=%s: %s", market.event_id, exc)
-            tag_cache[market.event_id] = []
-    market.tags = tag_cache[market.event_id]
-
-
 def _enter_new_positions(
     state: PaperState,
     candidates: list[CandidateInfo],
@@ -375,7 +402,7 @@ def _enter_new_positions(
                 bankroll=bankroll,
                 tier=cand.classification.tier,
                 maker_price=cand.maker_price,
-                estimated_true_probability=min(0.999, cand.maker_price + MIN_MARGIN_PP),
+                estimated_true_probability=cand.estimated_true_probability,
                 visible_book_depth_usd=market.liquidity or 0.0,
             )
         )
@@ -408,7 +435,7 @@ def _enter_new_positions(
             )
             continue
 
-        _ensure_event_tags(market, gamma, tag_cache)
+        ensure_event_tags(market, gamma, tag_cache)
         tags = tag_market(market)
         cluster_tracker.update_bankroll(bankroll)
         breaches = cluster_tracker.would_breach(tags, stake)
@@ -473,6 +500,7 @@ def run_tick(
     max_markets: int = PAPER_TARGET_SCAN_MARKETS,
     target_size_hint: float = 200.0,
     decision_log_path: str = PAPER_DECISION_LOG_FILE,
+    edge_estimator=None,
 ) -> TickReport:
     gamma = gamma or GammaClient()
     clob = clob or ClobClient()  # not currently read from; kept for callers/tests that want to stub it
@@ -482,15 +510,16 @@ def run_tick(
     state.n_ticks += 1
 
     open_market_ids = {p.market_id for p in state.open_positions}
-    candidates = scan_universe(
+    candidates, scanned = scan_universe(
         gamma,
         veto=veto,
         max_markets=max_markets,
         target_size_usd=target_size_hint,
         exclude_market_ids=open_market_ids,
         log_path=decision_log_path,
+        edge_estimator=edge_estimator,
     )
-    report.scanned = max_markets
+    report.scanned = scanned
     report.candidates_found = len(candidates)
     hurdle_roc = candidates[0].edge.annualized_roc if candidates else None
 

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from poly03.config import (
+    AMBIGUOUS_BOILERPLATE_PATTERNS,
     AMBIGUOUS_RESOLUTION_KEYWORDS,
     BOOK_A_HORIZON_CAP_DAYS,
     MAX_SPREAD_BOOK_A,
@@ -72,12 +73,27 @@ class ExclusionResult:
         return len(self.reasons) > 0
 
 
+_BOILERPLATE_RE = re.compile("|".join(AMBIGUOUS_BOILERPLATE_PATTERNS), re.I)
+
+
 def _resolution_text(market: Market) -> str:
     return f"{market.description} {market.resolution_source}".lower()
 
 
+def strip_resolution_boilerplate(text: str) -> str:
+    """Remove Polymarket's stock UMA resolution language before ambiguity
+    matching -- strategy_v2.md §1.2.
+
+    "This market will resolve based on ... a consensus of credible reporting"
+    appears on ~70% of all markets and says nothing about whether *this*
+    market's criteria are objective. Matching on it rejected 60 of the 85
+    in-band markets on grounds that applied to almost the entire venue.
+    """
+    return _BOILERPLATE_RE.sub(" ", text)
+
+
 def check_ambiguous_resolution(market: Market) -> list[str]:
-    text = _resolution_text(market)
+    text = strip_resolution_boilerplate(_resolution_text(market))
     return [kw for kw in AMBIGUOUS_RESOLUTION_KEYWORDS if kw in text]
 
 
@@ -142,6 +158,39 @@ def check_resolving_or_dispute(market: Market) -> bool:
     if any(s in unsettled_statuses for s in market.uma_resolution_statuses):
         return True
     return False
+
+
+def apply_resolution_risk_filters(market: Market) -> ExclusionResult:
+    """The resolution-integrity subset of §2.2, for Book M (strategy_v2.md §3.1).
+
+    Book M quotes rather than holds a directional view, so the liquidity and
+    horizon gates in `apply_exclusion_filters` are wrong for it in both
+    directions: `wide_spread` would reject exactly the markets that are most
+    profitable to quote (a wide spread is the opportunity), and `horizon_cap`
+    is a duration-risk control for a hold-to-resolution book that Book M is
+    not. Book M applies its own liquidity/price/spread gates in
+    making/universe.py.
+
+    What does carry over is everything about *whether the market resolves
+    cleanly*, because Book M will occasionally be caught holding inventory
+    into a resolution. That is what this subset covers.
+    """
+    result = ExclusionResult(market_id=market.id)
+
+    result.ambiguous_keyword_hits = check_ambiguous_resolution(market)
+    if result.ambiguous_keyword_hits:
+        result.reasons.append(ExclusionReason.AMBIGUOUS_RESOLUTION)
+
+    if check_unreliable_source(market):
+        result.reasons.append(ExclusionReason.UNRELIABLE_SOURCE)
+
+    if check_early_partial_resolution(market):
+        result.reasons.append(ExclusionReason.EARLY_PARTIAL_RESOLUTION)
+
+    if check_resolving_or_dispute(market):
+        result.reasons.append(ExclusionReason.RESOLVING_OR_DISPUTE)
+
+    return result
 
 
 def apply_exclusion_filters(

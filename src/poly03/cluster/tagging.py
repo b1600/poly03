@@ -8,6 +8,7 @@ and tracks live exposure against the caps so the exclusion filter can ask
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -21,6 +22,8 @@ from poly03.config import (
     MAX_THEME_CLUSTER_FRACTION,
 )
 from poly03.data.models import Market
+
+logger = logging.getLogger("poly03.cluster")
 
 _LEADING_STOPWORDS = {"Will", "The", "Is", "Does", "Are", "Was", "In", "A", "An", "Do"}
 
@@ -165,3 +168,24 @@ class ClusterExposureTracker:
         self.source_exposure[tags.resolution_source] = max(
             0.0, self.source_exposure.get(tags.resolution_source, 0.0) - stake
         )
+
+
+def ensure_event_tags(market: Market, gamma, tag_cache: dict[str, list[str]]) -> None:
+    """Backfill `market.tags` from the parent event, memoised per event_id.
+
+    Scans that paginate `/markets` (per-market volume order) get no event tags
+    attached, but ordering by *event* volume instead is not an option: it
+    front-loads the scan on a handful of mega multi-outcome events and, for
+    Book M, collapses the overlap with the reward-eligible set from ~24% to
+    ~3%. So we take the per-market ordering and pay for tags lazily, only for
+    the handful of markets that reach the point of needing them.
+    """
+    if market.tags or not market.event_id:
+        return
+    if market.event_id not in tag_cache:
+        try:
+            tag_cache[market.event_id] = gamma.get_event(market.event_id).tags
+        except Exception as exc:  # pragma: no cover - network failure path
+            logger.warning("failed to fetch event tags for event=%s: %s", market.event_id, exc)
+            tag_cache[market.event_id] = []
+    market.tags = tag_cache[market.event_id]

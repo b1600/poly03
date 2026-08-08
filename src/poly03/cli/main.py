@@ -13,6 +13,11 @@ from poly03.classifier.taxonomy import Tier
 from poly03.config import (
     BOOK_A_HORIZON_CAP_DAYS,
     BOOK_A_PRICE_BAND,
+    BOOK_A_REQUIRE_EDGE_ESTIMATE,
+    GAMMA_MAX_SCAN_MARKETS,
+    MAKING_DECISION_LOG_FILE,
+    MAKING_MAX_MARKETS_QUOTED,
+    MAKING_STATE_FILE,
     MIN_MARGIN_PP,
     PAPER_DECISION_LOG_FILE,
     PAPER_STARTING_BANKROLL,
@@ -29,7 +34,7 @@ def _log(msg: object = "") -> None:
     """print() that also appends to PAPER_TRADE_LOG_FILE, so console output
     from every subcommand survives after the terminal/session is gone."""
     msg = str(msg)
-    print(msg)
+    print(msg, flush=True)  # unbuffered: this loop is meant to run under nohup/tmux
     append_log(msg)
 
 
@@ -37,11 +42,19 @@ def cmd_scan(args: argparse.Namespace) -> None:
     """Apply exclusion filters + classifier + ROC scoring to the current
     open-market universe and print surviving Book A candidates.
 
-    q (estimated true probability) has no model wired up here -- it's a
-    placeholder floor of `price + MIN_MARGIN_PP`, which by construction
-    just barely clears the margin gate. Replace with a real probability
-    estimate before using edge_score for anything beyond a rough scan.
+    There is still no model for q here. strategy_v2.md §1.1 is the write-up of
+    why that matters: the placeholder `price + MIN_MARGIN_PP` makes the margin
+    gate a tautology, so this scan reports "candidates" that were never
+    actually screened for edge. It stays available as a universe-inspection
+    tool and prints the warning below; `poly03 make scan` is the Book M
+    equivalent that doesn't need q at all.
     """
+    if BOOK_A_REQUIRE_EDGE_ESTIMATE:
+        _log(
+            "WARNING: no edge estimator is wired up, so q is a placeholder and the\n"
+            "  margin gate below cannot reject anything for lack of edge (§1.1).\n"
+            "  These are price-band survivors, not screened candidates.\n"
+        )
     gamma = GammaClient()
     lo, hi = BOOK_A_PRICE_BAND
     found = 0
@@ -297,6 +310,173 @@ def cmd_paper_run(args: argparse.Namespace) -> None:
         notifier.flush()
 
 
+# --- strategy_v2.md §3/§4: Book M -----------------------------------------------
+
+
+def cmd_make_scan(args: argparse.Namespace) -> None:
+    """§3.1: show the current quotable universe and why everything else was
+    dropped. Read-only, no state written."""
+    from poly03.data.clob import ClobClient
+    from poly03.making.universe import select_universe
+
+    report = select_universe(GammaClient(), ClobClient(), max_gamma_markets=args.max_markets)
+
+    _log(f"gamma markets scanned:      {report.scanned}")
+    _log(f"reward-eligible (CLOB):     {report.reward_eligible}")
+    _log(f"quotable after §3.1 gates:  {len(report.quotable)}\n")
+
+    for qm in report.quotable[: args.limit]:
+        _log(
+            f"  ${qm.reward.daily_rate_usd:7,.0f}/day  {qm.market.best_bid:.3f}/{qm.market.best_ask:.3f} "
+            f"spread={qm.spread:.3f} minsz={qm.reward.min_size:>5,.0f} "
+            f"maxsp={qm.reward.max_spread_cents:.1f}c  [T{qm.classification.tier.value}] "
+            f"{qm.market.question[:52]}"
+        )
+
+    pool = sum(qm.reward.daily_rate_usd for qm in report.quotable)
+    _log(f"\ntotal reward pool across quotable markets: ${pool:,.0f}/day (${pool * 365:,.0f}/yr, split among all makers)")
+
+    _log("\nwhy markets were dropped (§3.1):")
+    for reason, n in sorted(report.rejections.items(), key=lambda kv: -kv[1]):
+        _log(f"  {reason}: {n}")
+
+
+def cmd_make_tick(args: argparse.Namespace) -> None:
+    from poly03.making.engine import run_tick
+    from poly03.making.state import load_state, save_state
+
+    state = load_state(args.state_file)
+    report = run_tick(
+        state,
+        max_gamma_markets=args.max_markets,
+        max_markets_quoted=args.max_quoted,
+        decision_log_path=args.log_file,
+    )
+    save_state(state, args.state_file)
+
+    s = report.summary
+    _log(f"tick @ {report.timestamp}")
+    _log(f"  scanned={s.gamma_scanned} reward_eligible={s.reward_eligible} quotable={s.quotable} quoted={s.quoted}")
+    _log(f"  collateral=${s.total_collateral_usd:,.2f}  est_rewards=${s.total_est_reward_usd_per_day:,.2f}/day")
+    if s.total_collateral_usd > 0:
+        _log(f"  implied yield on collateral: {s.daily_yield_on_collateral * 365:.1%}/yr (rewards only, pre-fills)")
+    if report.skipped:
+        _log(f"  skipped: {', '.join(f'{k}={v}' for k, v in sorted(report.skipped.items(), key=lambda kv: -kv[1]))}")
+
+
+def cmd_make_report(args: argparse.Namespace, log=_log) -> None:
+    from poly03.making import measurement as m
+    from poly03.making.state import load_state
+
+    state = load_state(args.state_file)
+    log("=== Book M -- §4 Phase 0 measurement ===\n")
+    log(m.SCORING_CAVEAT + "\n")
+
+    est = m.reward_estimate(state)
+    if est is None:
+        log("no ticks recorded yet -- run `poly03 make run` first.")
+        return
+
+    log(f"observation window: {est.observation_days:.2f}d over {est.n_ticks} ticks")
+    log(f"median collateral deployed:   ${est.median_collateral_usd:,.2f}")
+    log(f"median reward pool in quoted markets: ${est.median_pool_usd_per_day:,.2f}/day")
+    log(
+        f"estimated capture (all):      ${est.median_usd_per_day:,.2f}/day "
+        f"(p25 ${est.p25_usd_per_day:,.2f} / p75 ${est.p75_usd_per_day:,.2f})"
+    )
+    log(f"  of which IDENTIFIED:        ${est.median_identified_usd_per_day:,.2f}/day  <-- the defensible number")
+    log(
+        f"  of which unidentified:      "
+        f"${est.median_usd_per_day - est.median_identified_usd_per_day:,.2f}/day "
+        f"across ~{est.median_unidentified_quoted:.0f} markets with no competing depth"
+    )
+    log(f"estimated share of pool:      {est.median_share_of_pool:.2%}")
+    log(f"annualized yield on collateral: {est.annualized_yield_on_collateral:.1%}  <-- identified rewards only")
+    log("  (excludes spread capture and the maker rebate, which need fills, and")
+    log("   excludes adverse selection, which can exceed all of them -- §3.4)")
+
+    warning = m.implausibility_warning(est)
+    if warning:
+        log("\n" + warning)
+
+    log("\ntop markets by cumulative estimated accrual:")
+    for market_id, accrual in m.top_markets_by_accrual(state):
+        log(f"  {market_id}: {accrual:,.2f} reward-USD-days")
+
+    log("\nuniverse funnel (§3.1 rejections, all ticks):")
+    for reason, n in m.universe_funnel(state)[:12]:
+        log(f"  {reason}: {n:,}")
+
+    log("\n--- §4 Phase 0 gate ---")
+    log(m.phase0_gate(state).summary())
+
+
+def cmd_make_reset(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from poly03.making.state import MakingState, save_state
+
+    bankroll = args.bankroll if args.bankroll is not None else PAPER_STARTING_BANKROLL
+    save_state(MakingState(bankroll=bankroll), args.state_file)
+    Path(args.log_file).unlink(missing_ok=True)
+    _log(f"Book M state reset: bankroll=${bankroll:,.2f}  state_file={args.state_file}")
+
+
+def cmd_make_run(args: argparse.Namespace) -> None:
+    """§4 Phase 0: tick on an interval and accumulate the reward-share
+    observation series. Ctrl+C stops and prints the report."""
+    import time
+    from pathlib import Path
+
+    from poly03.making.engine import run_tick
+    from poly03.making.state import MakingState, load_state, save_state
+    from poly03.notify.telegram import TelegramReporter
+
+    logger = logging.getLogger("poly03.making")
+    notifier = TelegramReporter()
+
+    path = Path(args.state_file)
+    if path.exists():
+        state = load_state(args.state_file)
+        notifier.log(f"resuming Book M Phase 0 from {args.state_file}: {state.n_ticks} ticks recorded")
+    else:
+        bankroll = args.bankroll if args.bankroll is not None else PAPER_STARTING_BANKROLL
+        state = MakingState(bankroll=bankroll)
+        save_state(state, args.state_file)
+        notifier.log(f"started Book M Phase 0: bankroll=${bankroll:,.2f}  state_file={args.state_file}")
+
+    notifier.log(f"ticking every {args.interval}s. No orders are placed. Ctrl+C to stop and report.\n")
+    notifier.flush()
+
+    try:
+        while True:
+            try:
+                report = run_tick(
+                    state,
+                    max_gamma_markets=args.max_markets,
+                    max_markets_quoted=args.max_quoted,
+                    decision_log_path=args.log_file,
+                )
+                save_state(state, args.state_file)
+                s = report.summary
+                notifier.log(
+                    f"[{report.timestamp}] quotable={s.quotable} quoted={s.quoted} "
+                    f"collateral=${s.total_collateral_usd:,.0f} "
+                    f"est_rewards=${s.total_est_reward_usd_per_day:,.2f}/day"
+                )
+            except Exception as exc:
+                logger.warning("tick failed, will retry next interval: %s", exc)
+            notifier.flush()
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        notifier.log("\nstopping (Ctrl+C received)...")
+    finally:
+        save_state(state, args.state_file)
+        notifier.log("\n=== final §4 Phase 0 report ===\n")
+        cmd_make_report(args, log=notifier.log)
+        notifier.flush()
+
+
 def cmd_montecarlo(args: argparse.Namespace) -> None:
     from poly03.backtest.montecarlo import simulate_equity_paths, uniform_book
 
@@ -369,6 +549,39 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--max-markets", type=int, default=PAPER_TARGET_SCAN_MARKETS)
     p_run.add_argument("--force", action="store_true", help="keep running even if manual_review_required is set")
     p_run.set_defaults(func=cmd_paper_run)
+
+    p_make = sub.add_parser("make", help="strategy_v2.md §3 Book M: reward-subsidized making (no live orders)")
+    make_sub = p_make.add_subparsers(dest="make_command", required=True)
+
+    def _add_making_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--state-file", default=MAKING_STATE_FILE)
+        p.add_argument("--log-file", default=MAKING_DECISION_LOG_FILE)
+        p.add_argument("--max-markets", type=int, default=GAMMA_MAX_SCAN_MARKETS, help="Gamma markets to scan per tick (Gamma 422s past ~2100, so higher has no effect)")
+        p.add_argument("--max-quoted", type=int, default=MAKING_MAX_MARKETS_QUOTED)
+
+    p_mscan = make_sub.add_parser("scan", help="§3.1: show the quotable universe (read-only)")
+    p_mscan.add_argument("--max-markets", type=int, default=GAMMA_MAX_SCAN_MARKETS)
+    p_mscan.add_argument("--limit", type=int, default=30)
+    p_mscan.set_defaults(func=cmd_make_scan)
+
+    p_mtick = make_sub.add_parser("tick", help="one scan/quote/score cycle")
+    _add_making_args(p_mtick)
+    p_mtick.set_defaults(func=cmd_make_tick)
+
+    p_mreport = make_sub.add_parser("report", help="§4 Phase 0 reward-share measurement + gate")
+    _add_making_args(p_mreport)
+    p_mreport.set_defaults(func=cmd_make_report)
+
+    p_mreset = make_sub.add_parser("reset", help="wipe Book M Phase 0 state")
+    _add_making_args(p_mreset)
+    p_mreset.add_argument("--bankroll", type=float, default=None)
+    p_mreset.set_defaults(func=cmd_make_reset)
+
+    p_mrun = make_sub.add_parser("run", help="§4 Phase 0: tick forever, Ctrl+C to stop and report")
+    _add_making_args(p_mrun)
+    p_mrun.add_argument("--bankroll", type=float, default=None)
+    p_mrun.add_argument("--interval", type=int, default=1800)
+    p_mrun.set_defaults(func=cmd_make_run)
 
     p_mc = sub.add_parser("montecarlo", help="§4.2 Monte Carlo equity simulation")
     p_mc.add_argument("--n-positions", type=int, default=100)

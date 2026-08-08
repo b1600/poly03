@@ -28,6 +28,35 @@ Everything in `scan` and `backtest` works against **public, unauthenticated**
 Gamma/CLOB endpoints — `.env` is only needed once you wire in authenticated
 calls or (much later) order placement. Never commit `.env`.
 
+## Book M (`strategy_v2.md`) — reward-subsidized making
+
+`strategy_v1.md`'s Book A never traded: its edge gate was a tautology (`q` was
+defined as `price + margin`, so nothing could fail it) and two exclusion
+filters were miscalibrated to the venue. `strategy_v2.md` documents both, and
+proposes **Book M**, which earns from liquidity rewards, the maker rebate, and
+spread capture — all paid for *placing orders* rather than for being right, so
+no `q` is needed anywhere.
+
+```bash
+# §3.1: what's quotable right now, and why everything else was dropped
+uv run poly03 make scan
+
+# §4 Phase 0: accumulate the reward-share observation series (no orders placed)
+uv run poly03 make run --bankroll 10000
+
+# the deliverable: our estimated share of the reward pool, with its caveats
+uv run poly03 make report
+```
+
+Phase 0 places no orders and **simulates no fills** — deliberately. Fill rate,
+the realized maker fee, and adverse selection cannot be paper-traded, so they
+are Phase 1 (micro-live, ~$500) measurements. The reward figures come from a
+*reconstruction* of Polymarket's published scoring formula; every report says
+so, and the gate needs ≥200 ticks over ≥7 days before it reports READY.
+
+Book A still runs (`poly03 paper`) but will no longer enter without a real edge
+estimator wired in — see `BOOK_A_REQUIRE_EDGE_ESTIMATE` in `config.py`.
+
 ## Layout
 
 ```
@@ -45,11 +74,17 @@ src/poly03/
   backtest/
     engine.py           # §8 Phase 0: classifier calibration vs actual resolutions
     montecarlo.py       # §4.2 equity-path simulation, with correlated-loss stress test
+  making/               # strategy_v2.md §3: Book M -- reward-subsidized making
+    rewards.py          #   reward config (authoritative) + scoring reconstruction
+    universe.py         #   §3.1 which markets are worth quoting
+    quoting.py          #   §3.2 two-sided quote construction + inventory skew
+    engine.py           #   §4 Phase 0 tick: quote -> score -> estimate share
+    measurement.py      #   §4 reward-share estimate + Phase 0 gate
   paper/                # §8 Phase 1: paper trading
     state.py            #   PaperState/PaperPosition + JSON persistence, JSONL decision log
     engine.py            #   run_tick(): scan -> manage open positions -> kill switches -> enter
     measurement.py        #   §7: calibration by tier, Brier, drawdown, P&L attribution, Phase-1 gate
-  cli/main.py           # `poly03 scan|backtest|montecarlo|paper`
+  cli/main.py           # `poly03 scan|backtest|montecarlo|paper|make`
 ```
 
 ## CLI
@@ -100,11 +135,14 @@ produce a statistically meaningful §7 calibration sample (§8's gate wants
 
 Still true from Phase 0:
 
-- **No real q (true probability) model.** Both `scan` and the paper
-  engine's edge_score use a placeholder (`price + MIN_MARGIN_PP`) purely
-  to demonstrate the scoring pipeline — it is not a probability estimate.
-  Producing a real one is the actual research problem; nothing here solves
-  it.
+- **No real q (true probability) model.** `scan` still uses the placeholder
+  (`price + MIN_MARGIN_PP`) and now prints a warning saying so. As of
+  `strategy_v2.md` §1.1 this is treated as disqualifying rather than
+  cosmetic: because the placeholder makes the margin gate a tautology, the
+  paper engine refuses to enter at all unless a real `edge_estimator` is
+  passed in (`BOOK_A_REQUIRE_EDGE_ESTIMATE`). Producing that estimator is
+  the actual research problem; nothing here solves it. Book M exists
+  precisely so that progress doesn't depend on solving it.
 - **No LLM veto wired up.** `classifier/llm_veto.py` defines the interface
   (§3.2: structured output, explicit confidence, cited clause, can only
   lower a tier) but ships a no-op. The rules engine in `rules.py` is

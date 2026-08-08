@@ -30,6 +30,22 @@ class GammaClient:
         resp.raise_for_status()
         return resp.json()
 
+    def _get_page(self, path: str, params: dict[str, Any]) -> list | None:
+        """Paginated GET that treats Gamma's offset ceiling as end-of-data.
+
+        Gamma 422s past roughly offset=2000 on the list endpoints, for every
+        sort order. That is a hard server-side cap on how deep any scan can
+        page, not a transient error -- so callers get a clean stop rather than
+        an exception that would take down a long-running loop mid-tick.
+        """
+        try:
+            return self._get(path, params=params)
+        except requests.HTTPError as exc:
+            resp = exc.response
+            if resp is not None and resp.status_code == 422 and params.get("offset"):
+                return None
+            raise
+
     # --- events -------------------------------------------------------------
 
     def get_event(self, event_id: str) -> Event:
@@ -59,7 +75,7 @@ class GammaClient:
         pages = 0
         while True:
             params["offset"] = offset
-            batch = self._get("/events", params=params)
+            batch = self._get_page("/events", params)
             if not batch:
                 return
             for raw in batch:
@@ -105,7 +121,7 @@ class GammaClient:
         pages = 0
         while True:
             params["offset"] = offset
-            batch = self._get("/markets", params=params)
+            batch = self._get_page("/markets", params)
             if not batch:
                 return
             for raw in batch:
