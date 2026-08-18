@@ -242,6 +242,34 @@ GAMMA_MAX_SCAN_MARKETS = int(_env_float("GAMMA_MAX_SCAN_MARKETS", 2100))
 MAKING_STATE_FILE = _env("MAKING_STATE_FILE", "making_state.json")
 MAKING_DECISION_LOG_FILE = _env("MAKING_DECISION_LOG_FILE", "making_decisions.jsonl")
 
+# --- strategy_v2.md §4 Phase 1: micro-live execution --------------------------------
+
+# Deliberately a separate file from MAKING_STATE_FILE. Phase 0's state is a
+# simulated observation series (no positions, no fills -- see
+# making/state.py's docstring); Phase 1 holds real inventory funded with real
+# capital. Sharing a file would mix simulated ticks with real fills in the
+# same series and corrupt both the Phase 0 estimate and the Phase 1
+# measurement.
+MAKING_LIVE_STATE_FILE = _env("MAKING_LIVE_STATE_FILE", "making_live_state.json")
+MAKING_LIVE_DECISION_LOG_FILE = _env("MAKING_LIVE_DECISION_LOG_FILE", "making_live_decisions.jsonl")
+
+# Hard ceiling on deployed capital for Phase 1, independent of whatever
+# MAKING_MAX_DEPLOYED_FRACTION would otherwise allow. strategy_v2.md §4:
+# Phase 1 runs at ~$500, not whatever fraction of a hypothetical bankroll the
+# Phase 0 defaults imply.
+MAKING_LIVE_BANKROLL_CAP_USD = _env_float("MAKING_LIVE_BANKROLL_CAP_USD", 500.0)
+
+# Adverse-selection kill switch (§4 rollout plan, item 3). Book M has no `q`,
+# so v1's Tier-1-miss / drawdown switches don't apply -- this book's failure
+# mode is getting picked off by informed flow, which shows up as fills that
+# mark out against us, not as a resolved loss. Trips when the last N scored
+# fills (5-minute markout, see making/execution.py compute_markouts) were ALL
+# worse than this many cents/share -- a strict "every recent fill was bad",
+# not an average, since the average dilutes a real regime change with older
+# good fills.
+MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE = int(_env_float("MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE", 5))
+MAKING_LIVE_KILL_MARKOUT_CENTS_PER_SHARE = _env_float("MAKING_LIVE_KILL_MARKOUT_CENTS_PER_SHARE", 2.0)
+
 # --- Telegram notifications (optional) -------------------------------------------------
 # Forwards `poly03 paper run` console output to a Telegram chat. Unset by
 # default -- notifications are best-effort and never required for the paper

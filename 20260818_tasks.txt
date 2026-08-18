@@ -1,0 +1,47 @@
+Phase 1 checklist — micro-live at ~$500 (strategy_v2.md §4)
+
+Gate to clear: rewards + rebate + spread capture > realized adverse selection, over ≥500 fills, before scaling to Phase 2. Everything below exists to make that comparison measurable and to bound the downside while it's being measured.
+
+0. Prerequisites (not code — infra/ops)
+
+- Wallet funded with ~$500 USDC on Polygon; POLYMARKET_PRIVATE_KEY + POLYMARKET_FUNDER_ADDRESS set in .env.
+- Derive L2 creds once via ClobClient.derive_api_creds() (already exists) and store POLYMARKET_CLOB_API_KEY/SECRET/PASSPHRASE.
+- Separate read-only vs trading keys per v1 §5.3 — the scanner can keep using unauthenticated reads; only the execution path needs the signing key.
+- Decide where this runs unattended (screen/tmux/systemd, same pattern as the paper loop) and how you'll be alerted (Telegram reporter already wired for logs — needs a "halt"/error path that actually pages you, not just logs).
+
+1. Execution engine (new)
+
+- Wrap py-clob-client's order placement/cancel — currently data/clob.py is 100% read-only.
+- Client-generated idempotent order IDs (v1 §5.3) — never double-fill on a retry.
+- Post the two-sided quote pairs making/quoting.py already computes — that logic doesn't change, only "would quote" becomes "does quote."
+- Cancel + re-quote on mid movement beyond MAKING_REQUOTE_MID_MOVE_CENTS (config already has the threshold, nothing consumes it live yet).
+- Flatten logic that actually fires inside MAKING_FLATTEN_HOURS_BEFORE_RESOLUTION — right now that constant only feeds the universe filter, not an exit action.
+
+2. State & reconciliation (extend making/state.py)
+
+- Track real inventory per market (not just tick observations).
+- Reconcile local state against the API every cycle — trust the API, not local assumptions (v1 §5.3).
+- Record actual fills: price, size, timestamp, side.
+- Record realized rewards/rebate/fees once payouts are observable, so they can be compared against the Phase 0 estimate — this is the whole point of Phase 1 per §4 ("check the reconstructed scoring and the realized maker fee against actual payouts").
+- Track adverse selection directly: mark fills against subsequent mid-price movement.
+
+3. Hard caps specific to this phase
+
+- Total deployed capital hard-ceilinged at ~$500 regardless of what MAKING_MAX_DEPLOYED_FRACTION would otherwise allow on a larger bankroll.
+- Keep MAKING_MAX_INVENTORY_PER_MARKET_FRACTION and cluster caps active on real inventory, not simulated.
+- A kill switch on realized adverse selection, separate from v1's drawdown kill switch — this book has no q, so the existing Tier-1-miss switch doesn't apply; needs its own trigger (e.g., N consecutive fills marked against you beyond X¢).
+
+4. Measurement additions (extend making/measurement.py)
+
+- Realized vs. estimated reward capture (the §2.1 fee caveat and the rewards.py reconstruction both get validated or falsified here).
+- Fill rate on resting quotes — meaningless in Phase 0 (assumed, not simulated); real for the first time.
+- The actual §4 gate computation: capture vs. adverse selection over the running fill count, with a explicit ≥500-fill readout.
+
+5. Sequencing
+
+1. Credentials + wallet funding (you, outside this session).
+2. Execution engine, defaulted to a dry-run/--live flag so it can be tested against testnet-style small size before real capital touches it.
+3. State/reconciliation extensions — needed before any order goes live, since without them a fill is unobservable.
+4. Wire hard caps and the new kill switch.
+5. Go live at minimum size (rewardsMinSize, ~$50–200/market per v2 §3.2) across a handful of markets first, not all 40 at once — confirm fills, fees, and reconciliation behave before scaling to the full quoted set.
+6. Run to ≥500 fills / 2 weeks, then run the §4 gate computation.

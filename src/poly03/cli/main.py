@@ -16,6 +16,8 @@ from poly03.config import (
     BOOK_A_REQUIRE_EDGE_ESTIMATE,
     GAMMA_MAX_SCAN_MARKETS,
     MAKING_DECISION_LOG_FILE,
+    MAKING_LIVE_DECISION_LOG_FILE,
+    MAKING_LIVE_STATE_FILE,
     MAKING_MAX_MARKETS_QUOTED,
     MAKING_STATE_FILE,
     MIN_MARGIN_PP,
@@ -477,6 +479,212 @@ def cmd_make_run(args: argparse.Namespace) -> None:
         notifier.flush()
 
 
+# --- strategy_v2.md §4 Phase 1: micro-live execution ---------------------------
+
+
+def _report_line(report, state) -> str:
+    mode = "LIVE" if not report.dry_run else "DRY-RUN"
+    if report.dry_run:
+        action_bits = f"would_place={len(report.would_place)} would_cancel={len(report.would_cancel)}"
+    else:
+        action_bits = (
+            f"placed={len(report.placed)} cancelled={len(report.cancelled)} "
+            f"flattened={len(report.flattened)} new_fills={len(report.new_fills)}"
+        )
+    line = (
+        f"[{mode}] [{report.timestamp}] quotable={len(report.universe.quotable)} {action_bits} "
+        f"equity=${state.equity_usd:,.2f}"
+    )
+    if report.errors:
+        line += f" ERRORS={len(report.errors)}"
+    return line
+
+
+def cmd_make_live_tick(args: argparse.Namespace) -> None:
+    from poly03.making.execution import run_live_tick
+    from poly03.making.live_state import load_state, save_state
+
+    state = load_state(args.state_file)
+    if state.halted and not args.force:
+        _log("HALTED: Book M live state is halted. Investigate before continuing. Re-run with --force to tick anyway.")
+        return
+
+    report = run_live_tick(
+        state,
+        max_gamma_markets=args.max_markets,
+        max_markets_quoted=args.max_quoted,
+        dry_run=not args.live,
+        decision_log_path=args.log_file,
+    )
+    save_state(state, args.state_file)
+
+    _log(_report_line(report, state))
+    if report.errors:
+        for e in report.errors[:5]:
+            _log(f"  error: {e}")
+    if report.skipped:
+        _log(f"  skipped: {', '.join(f'{k}={v}' for k, v in sorted(report.skipped.items(), key=lambda kv: -kv[1]))}")
+    if not args.live and report.would_place:
+        _log("  (dry-run: pass --live to actually place these)")
+
+
+def cmd_make_live_status(args: argparse.Namespace) -> None:
+    from poly03.making.live_state import load_state
+
+    state = load_state(args.state_file)
+    _log(f"bankroll cap: ${state.bankroll_cap_usd:,.2f}")
+    _log(f"cash: ${state.cash_usd:,.2f}")
+    _log(f"deployed collateral: ${state.deployed_collateral_usd:,.2f}")
+    _log(f"equity: ${state.equity_usd:,.2f}")
+    _log(f"open positions: {len(state.open_positions)}  open orders: {len(state.open_orders)}  fills: {len(state.fills)}")
+    _log(f"realized reward: ${state.realized_reward_usd_total:,.2f} ({len(state.reward_payouts)} logged payouts)")
+    _log(f"realized fee: ${state.realized_fee_usd_total:,.2f}")
+
+    scored_5m = [f.markout_5m_usd for f in state.fills if f.markout_5m_usd is not None]
+    scored_30m = [f.markout_30m_usd for f in state.fills if f.markout_30m_usd is not None]
+    if scored_5m:
+        _log(f"adverse selection, 5m markout:  sum=${sum(scored_5m):+,.2f}  n={len(scored_5m)}  avg=${sum(scored_5m) / len(scored_5m):+,.4f}")
+    if scored_30m:
+        _log(f"adverse selection, 30m markout: sum=${sum(scored_30m):+,.2f}  n={len(scored_30m)}  avg=${sum(scored_30m) / len(scored_30m):+,.4f}")
+    if state.fills and not scored_5m:
+        _log("adverse selection: no fills old enough yet to score (needs 5m+)")
+
+    _log(f"ticks run: {state.n_ticks}  last reconciled: {state.last_reconciled_at or 'never'}")
+    if state.halted:
+        _log(f"HALTED: {'; '.join(state.halt_reasons)}")
+
+
+def cmd_make_live_report(args: argparse.Namespace, log=_log) -> None:
+    from pathlib import Path
+
+    from poly03.making import live_measurement as m
+    from poly03.making.live_state import load_state as load_live_state
+    from poly03.making.state import load_state as load_phase0_state
+
+    state = load_live_state(args.state_file)
+
+    log("=== Book M -- §4 Phase 1 measurement ===\n")
+
+    phase0_state = None
+    if Path(args.phase0_state_file).exists():
+        phase0_state = load_phase0_state(args.phase0_state_file)
+    rc = m.reward_capture_comparison(state, phase0_state)
+    log("reward capture, realized vs. Phase 0 estimate:")
+    if rc.realized_usd_per_day is not None:
+        log(f"  realized:  ${rc.realized_usd_per_day:,.2f}/day (${rc.realized_total_usd:,.2f} total, {rc.n_payouts} logged payouts over {rc.observation_days:.1f}d)")
+    else:
+        log(f"  realized:  n/a -- observation window too short ({rc.observation_days * 24:.1f}h < 1h) to compute a rate (${rc.realized_total_usd:,.2f} total so far)")
+    if rc.estimated_usd_per_day is not None:
+        log(f"  estimated: ${rc.estimated_usd_per_day:,.2f}/day (Phase 0, {args.phase0_state_file})")
+        if rc.ratio is not None:
+            log(f"  ratio (realized/estimated): {rc.ratio:.1%}")
+    else:
+        log(f"  estimated: n/a (no Phase 0 state found at {args.phase0_state_file})")
+
+    fr = m.fill_rate(args.log_file)
+    log("\nfill rate on resting quotes (real, not assumed):")
+    log(f"  orders placed: {fr.n_orders_placed}  orders filled (>=1 fill): {fr.n_orders_filled}")
+    if fr.order_count_fill_rate is not None:
+        log(f"  fill rate by order count: {fr.order_count_fill_rate:.1%}")
+    if fr.notional_fill_rate is not None:
+        log(f"  fill rate by notional:    {fr.notional_fill_rate:.1%} (${fr.notional_filled_usd:,.2f} / ${fr.notional_placed_usd:,.2f})")
+
+    adv = m.adverse_selection_summary(state)
+    log("\nadverse selection (markout-based, 30m where matured else 5m):")
+    log(f"  fills: {adv.n_fills}  scored: {adv.n_scored}")
+    log(f"  spread capture (favorable markouts): ${adv.spread_capture_usd:,.2f}")
+    log(f"  adverse selection (unfavorable markouts): ${adv.adverse_selection_usd:,.2f}")
+    log(f"  reward: ${adv.reward_usd:,.2f}   fees: ${adv.fee_usd:,.2f}")
+    log(f"  capture (reward + spread capture - fees): ${adv.capture_usd:,.2f}")
+    log(f"  net (capture - adverse selection): ${adv.net_usd:+,.2f}")
+
+    log("\n--- §4 Phase 1 gate ---")
+    log(m.phase1_gate(state).summary())
+
+
+def cmd_make_live_record_reward(args: argparse.Namespace) -> None:
+    from poly03.making.live_state import load_state, save_state
+
+    state = load_state(args.state_file)
+    state.record_reward_payout(args.amount, note=args.note or "")
+    save_state(state, args.state_file)
+    _log(f"logged reward payout of ${args.amount:,.2f}. realized_reward_usd_total is now ${state.realized_reward_usd_total:,.2f}")
+
+
+def cmd_make_live_reset(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
+    from poly03.config import MAKING_LIVE_BANKROLL_CAP_USD
+    from poly03.making.live_state import LiveMakingState, save_state
+
+    cap = args.bankroll_cap if args.bankroll_cap is not None else MAKING_LIVE_BANKROLL_CAP_USD
+    save_state(LiveMakingState(bankroll_cap_usd=cap, cash_usd=cap), args.state_file)
+    Path(args.log_file).unlink(missing_ok=True)
+    _log(f"Book M live state reset: bankroll_cap=${cap:,.2f}  state_file={args.state_file}")
+
+
+def cmd_make_live_run(args: argparse.Namespace) -> None:
+    """§4 Phase 1: tick on an interval. Dry-run (report only, no network
+    writes) unless --live is passed -- see making/execution.py's module
+    docstring for the full safety model."""
+    import time
+    from pathlib import Path
+
+    from poly03.config import MAKING_LIVE_BANKROLL_CAP_USD
+    from poly03.making.execution import run_live_tick
+    from poly03.making.live_state import LiveMakingState, load_state, save_state
+    from poly03.notify.telegram import TelegramReporter
+
+    logger = logging.getLogger("poly03.making.execution")
+    notifier = TelegramReporter()
+
+    path = Path(args.state_file)
+    if path.exists():
+        state = load_state(args.state_file)
+        notifier.log(f"resuming Book M live state from {args.state_file}: {state.n_ticks} ticks, equity=${state.equity_usd:,.2f}")
+    else:
+        cap = args.bankroll_cap if args.bankroll_cap is not None else MAKING_LIVE_BANKROLL_CAP_USD
+        state = LiveMakingState(bankroll_cap_usd=cap, cash_usd=cap)
+        save_state(state, args.state_file)
+        notifier.log(f"started Book M live state: bankroll_cap=${cap:,.2f}  state_file={args.state_file}")
+
+    mode = "LIVE -- real orders will be placed" if args.live else "DRY-RUN -- no orders placed, no network writes"
+    notifier.log(f"ticking every {args.interval}s [{mode}]. Ctrl+C to stop.\n")
+    notifier.flush()
+
+    try:
+        while True:
+            if state.halted and not args.force:
+                notifier.log("HALTED: investigate before continuing. Re-run with --force to override.")
+                notifier.flush()
+                break
+            try:
+                report = run_live_tick(
+                    state,
+                    max_gamma_markets=args.max_markets,
+                    max_markets_quoted=args.max_quoted,
+                    dry_run=not args.live,
+                    decision_log_path=args.log_file,
+                )
+                save_state(state, args.state_file)
+                notifier.log(_report_line(report, state))
+            except Exception as exc:
+                logger.warning("live tick failed, will retry next interval: %s", exc)
+            notifier.flush()
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        notifier.log("\nstopping (Ctrl+C received)...")
+    finally:
+        save_state(state, args.state_file)
+        notifier.log(
+            f"\nfinal equity: ${state.equity_usd:,.2f}  open positions: {len(state.open_positions)}  "
+            f"open orders: {len(state.open_orders)}  fills: {len(state.fills)}"
+        )
+        notifier.log("\n=== final §4 Phase 1 report ===\n")
+        cmd_make_live_report(args, log=notifier.log)
+        notifier.flush()
+
+
 def cmd_montecarlo(args: argparse.Namespace) -> None:
     from poly03.backtest.montecarlo import simulate_equity_paths, uniform_book
 
@@ -582,6 +790,58 @@ def build_parser() -> argparse.ArgumentParser:
     p_mrun.add_argument("--bankroll", type=float, default=None)
     p_mrun.add_argument("--interval", type=int, default=1800)
     p_mrun.set_defaults(func=cmd_make_run)
+
+    p_mlive = make_sub.add_parser(
+        "live", help="§4 Phase 1: micro-live execution -- real orders only with --live, dry-run otherwise"
+    )
+    live_sub = p_mlive.add_subparsers(dest="live_command", required=True)
+
+    def _add_live_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--state-file", default=MAKING_LIVE_STATE_FILE)
+        p.add_argument("--log-file", default=MAKING_LIVE_DECISION_LOG_FILE)
+        p.add_argument("--max-markets", type=int, default=GAMMA_MAX_SCAN_MARKETS)
+        p.add_argument("--max-quoted", type=int, default=MAKING_MAX_MARKETS_QUOTED)
+        p.add_argument(
+            "--live", action="store_true", help="place real orders; default is dry-run (no network writes)"
+        )
+
+    p_ltick = live_sub.add_parser("tick", help="one reconcile/unwind/quote cycle")
+    _add_live_args(p_ltick)
+    p_ltick.add_argument("--force", action="store_true", help="tick even if state is halted")
+    p_ltick.set_defaults(func=cmd_make_live_tick)
+
+    p_lstatus = live_sub.add_parser("status", help="show live bankroll/positions/orders")
+    p_lstatus.add_argument("--state-file", default=MAKING_LIVE_STATE_FILE)
+    p_lstatus.set_defaults(func=cmd_make_live_status)
+
+    p_lreport = live_sub.add_parser("report", help="§4 Phase 1 measurement: realized vs. estimated, fill rate, adverse selection, gate")
+    p_lreport.add_argument("--state-file", default=MAKING_LIVE_STATE_FILE)
+    p_lreport.add_argument("--log-file", default=MAKING_LIVE_DECISION_LOG_FILE)
+    p_lreport.add_argument("--phase0-state-file", default=MAKING_STATE_FILE, help="Phase 0 state file to compare the realized reward rate against")
+    p_lreport.set_defaults(func=cmd_make_live_report)
+
+    p_lreward = live_sub.add_parser(
+        "record-reward",
+        help="manually log an observed reward payout (rewards aren't reconcilable per-order, see live_state.py)",
+    )
+    p_lreward.add_argument("--state-file", default=MAKING_LIVE_STATE_FILE)
+    p_lreward.add_argument("--amount", type=float, required=True)
+    p_lreward.add_argument("--note", type=str, default="")
+    p_lreward.set_defaults(func=cmd_make_live_record_reward)
+
+    p_lreset = live_sub.add_parser("reset", help="wipe Book M live state")
+    p_lreset.add_argument("--state-file", default=MAKING_LIVE_STATE_FILE)
+    p_lreset.add_argument("--log-file", default=MAKING_LIVE_DECISION_LOG_FILE)
+    p_lreset.add_argument("--bankroll-cap", type=float, default=None)
+    p_lreset.set_defaults(func=cmd_make_live_reset)
+
+    p_lrun = live_sub.add_parser("run", help="tick forever on an interval, Ctrl+C to stop")
+    _add_live_args(p_lrun)
+    p_lrun.add_argument("--bankroll-cap", type=float, default=None)
+    p_lrun.add_argument("--interval", type=int, default=1800)
+    p_lrun.add_argument("--force", action="store_true", help="keep running even if state is halted")
+    p_lrun.add_argument("--phase0-state-file", default=MAKING_STATE_FILE, help="Phase 0 state file to compare the realized reward rate against")
+    p_lrun.set_defaults(func=cmd_make_live_run)
 
     p_mc = sub.add_parser("montecarlo", help="§4.2 Monte Carlo equity simulation")
     p_mc.add_argument("--n-positions", type=int, default=100)

@@ -1,10 +1,9 @@
 """Thin wrapper around py-clob-client for the read paths strategy_v1.md
-needs: live order books, best bid/ask, tick size, min order size.
-
-Order-book reads and price queries need no auth at all. L1 (private key)
-and L2 (api key/secret/passphrase) creds are wired through so this same
-client can grow into order placement later without changing its shape --
-but nothing here places an order. Phase 0 is data-only.
+needs: live order books, best bid/ask, tick size, min order size -- plus,
+for strategy_v2.md §4 Phase 1, the write paths: post/cancel a limit order,
+list open orders. The write methods all require L2 creds and raise loudly
+if they're missing; nothing in this file signs or sends anything unless the
+caller explicitly asks it to place or cancel an order.
 """
 
 from __future__ import annotations
@@ -17,6 +16,18 @@ from py_clob_client.clob_types import ApiCreds
 
 from poly03.config import Credentials, get_credentials, get_endpoints
 from poly03.data.models import OrderBook, PriceLevel
+
+_VALID_TICK_SIZES = ("0.1", "0.01", "0.001", "0.0001")
+
+
+def _tick_size_literal(tick: float) -> str:
+    """py-clob-client's PartialCreateOrderOptions.tick_size wants one of a
+    fixed set of strings, not a float. Match on the closest valid tick
+    rather than str(tick), since float formatting isn't guaranteed to hit
+    e.g. "0.01" exactly."""
+    as_float = [float(t) for t in _VALID_TICK_SIZES]
+    closest = min(as_float, key=lambda t: abs(t - tick))
+    return _VALID_TICK_SIZES[as_float.index(closest)]
 
 
 class ClobClient:
@@ -94,6 +105,77 @@ class ClobClient:
     def get_fee_rate_bps(self, token_id: str) -> int | None:
         try:
             return self._client.get_fee_rate_bps(token_id)
+        except Exception:
+            return None
+
+    # --- strategy_v2.md §4 Phase 1: order placement ---------------------------
+
+    def _require_l2(self) -> None:
+        if not self.creds.has_l2:
+            raise RuntimeError(
+                "L2 API credentials required to place/cancel orders "
+                "(POLYMARKET_CLOB_API_KEY/SECRET/PASSPHRASE). Run "
+                "ClobClient.derive_api_creds() once and save the result into .env."
+            )
+
+    def post_limit_order(
+        self,
+        *,
+        token_id: str,
+        price: float,
+        size: float,
+        side: str,
+        tick_size: float,
+        neg_risk: bool = False,
+    ) -> dict:
+        """Sign and rest one GTC limit order. `side` is
+        `py_clob_client.order_builder.constants.BUY` or `.SELL`. Requires L2
+        creds -- this is the only place in the codebase that spends real
+        capital."""
+        self._require_l2()
+        from py_clob_client.clob_types import OrderArgs, OrderType, PartialCreateOrderOptions
+
+        order_args = OrderArgs(token_id=token_id, price=price, size=size, side=side)
+        options = PartialCreateOrderOptions(tick_size=_tick_size_literal(tick_size), neg_risk=neg_risk)
+        signed = self._client.create_order(order_args, options)
+        return self._client.post_order(signed, OrderType.GTC)
+
+    def cancel_order(self, order_id: str) -> dict:
+        self._require_l2()
+        return self._client.cancel(order_id)
+
+    def cancel_orders(self, order_ids: Iterable[str]) -> dict:
+        ids = list(order_ids)
+        if not ids:
+            return {}
+        self._require_l2()
+        return self._client.cancel_orders(ids)
+
+    def cancel_all(self) -> dict:
+        self._require_l2()
+        return self._client.cancel_all()
+
+    def get_open_orders(self, *, market: str | None = None, asset_id: str | None = None) -> list[dict]:
+        """All open orders, optionally scoped to one market/asset. Paginated
+        by opaque cursor, same "LTE=" end sentinel as iter_sampling_markets."""
+        self._require_l2()
+        from py_clob_client.clob_types import OpenOrderParams
+
+        params = OpenOrderParams(market=market, asset_id=asset_id)
+        cursor = "MA=="
+        out: list[dict] = []
+        while True:
+            page = self._client.get_orders(params, cursor)
+            batch = page.get("data", []) if isinstance(page, dict) else (page or [])
+            out.extend(batch)
+            cursor = page.get("next_cursor") if isinstance(page, dict) else "LTE="
+            if not cursor or cursor == "LTE=":
+                return out
+
+    def get_order(self, order_id: str) -> dict | None:
+        self._require_l2()
+        try:
+            return self._client.get_order(order_id)
         except Exception:
             return None
 
