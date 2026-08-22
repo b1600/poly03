@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from poly03.data.models import OrderBook
-from poly03.making.engine import run_tick
+from poly03.making.engine import _inventory_cap_shares, run_tick
 from poly03.making.measurement import phase0_gate, reward_estimate, universe_funnel
 from poly03.making.rewards import RewardConfig
 from poly03.making.state import MakingState, MakingTickSummary
@@ -241,3 +241,20 @@ def test_universe_funnel_aggregates_across_ticks():
     t2.rejections = {"below_min_24h_volume": 3, "no_funded_rewards": 10}
     state.ticks = [t1, t2]
     assert universe_funnel(state) == [("no_funded_rewards", 10), ("below_min_24h_volume", 8)]
+
+
+def test_inventory_cap_shares_default_fraction_matches_phase0_constant():
+    from poly03.config import MAKING_MAX_INVENTORY_PER_MARKET_FRACTION
+
+    assert _inventory_cap_shares(100.0, 0.50) == (MAKING_MAX_INVENTORY_PER_MARKET_FRACTION * 100.0) / 0.50
+
+
+def test_inventory_cap_shares_accepts_a_live_fraction_override():
+    """task 20260818_2012 item 1a: execution.py's live engine passes a much
+    larger fraction than Phase 0's default (0.02), since at a small live
+    bankroll the default rejects every market's min_size before it's ever
+    quoted."""
+    default_cap = _inventory_cap_shares(100.0, 0.50)
+    live_cap = _inventory_cap_shares(100.0, 0.50, fraction=0.25)
+    assert live_cap > default_cap
+    assert live_cap == (0.25 * 100.0) / 0.50

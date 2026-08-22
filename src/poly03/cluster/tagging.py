@@ -109,6 +109,14 @@ class ClusterExposureTracker:
     """Live $ exposure per cluster dimension, checked against §4.3 caps.
     bankroll is mutable on purpose -- call update_bankroll() as it changes
     so caps stay relative to current capital, not the value at construction.
+
+    The four `*_cap_fraction` fields default to the module-level §4.3
+    constants (Phase 0's behavior, unchanged) but can be overridden per
+    instance -- execution.py's live engine passes the much larger
+    MAKING_LIVE_MAX_*_CLUSTER_FRACTION knobs, since the Phase 0 fractions are
+    sized for a bankroll orders of magnitude bigger than a real live
+    bankroll_cap and would block every market's minimum quote on their own
+    (task 20260818_2012 item 1b).
     """
 
     bankroll: float
@@ -116,6 +124,10 @@ class ClusterExposureTracker:
     theme_exposure: dict[str, float] = field(default_factory=dict)
     date_bucket_exposure: dict[str, float] = field(default_factory=dict)
     source_exposure: dict[str, float] = field(default_factory=dict)
+    entity_cap_fraction: float = MAX_ENTITY_CLUSTER_FRACTION
+    theme_cap_fraction: float = MAX_THEME_CLUSTER_FRACTION
+    date_bucket_cap_fraction: float = MAX_DATE_BUCKET_FRACTION
+    source_cap_fraction: float = MAX_RESOLUTION_SOURCE_FRACTION
 
     def update_bankroll(self, bankroll: float) -> None:
         self.bankroll = bankroll
@@ -125,24 +137,24 @@ class ClusterExposureTracker:
         if self.bankroll <= 0:
             return reasons
 
-        entity_cap = MAX_ENTITY_CLUSTER_FRACTION * self.bankroll
+        entity_cap = self.entity_cap_fraction * self.bankroll
         if self.entity_exposure.get(tags.entity, 0.0) + stake > entity_cap:
-            reasons.append(f"entity cluster '{tags.entity}' would exceed {MAX_ENTITY_CLUSTER_FRACTION:.0%} cap")
+            reasons.append(f"entity cluster '{tags.entity}' would exceed {self.entity_cap_fraction:.0%} cap")
 
         for theme in tags.themes:
-            theme_cap = MAX_THEME_CLUSTER_FRACTION * self.bankroll
+            theme_cap = self.theme_cap_fraction * self.bankroll
             if self.theme_exposure.get(theme, 0.0) + stake > theme_cap:
-                reasons.append(f"theme cluster '{theme}' would exceed {MAX_THEME_CLUSTER_FRACTION:.0%} cap")
+                reasons.append(f"theme cluster '{theme}' would exceed {self.theme_cap_fraction:.0%} cap")
 
         if tags.date_bucket is not None:
-            bucket_cap = MAX_DATE_BUCKET_FRACTION * self.bankroll
+            bucket_cap = self.date_bucket_cap_fraction * self.bankroll
             if self.date_bucket_exposure.get(tags.date_bucket, 0.0) + stake > bucket_cap:
-                reasons.append(f"date bucket '{tags.date_bucket}' would exceed {MAX_DATE_BUCKET_FRACTION:.0%} cap")
+                reasons.append(f"date bucket '{tags.date_bucket}' would exceed {self.date_bucket_cap_fraction:.0%} cap")
 
-        source_cap = MAX_RESOLUTION_SOURCE_FRACTION * self.bankroll
+        source_cap = self.source_cap_fraction * self.bankroll
         if self.source_exposure.get(tags.resolution_source, 0.0) + stake > source_cap:
             reasons.append(
-                f"resolution source '{tags.resolution_source}' would exceed {MAX_RESOLUTION_SOURCE_FRACTION:.0%} cap"
+                f"resolution source '{tags.resolution_source}' would exceed {self.source_cap_fraction:.0%} cap"
             )
 
         return reasons

@@ -40,6 +40,13 @@ class Credentials:
     api_secret: str | None = field(default_factory=lambda: _env("POLYMARKET_CLOB_API_SECRET"))
     api_passphrase: str | None = field(default_factory=lambda: _env("POLYMARKET_CLOB_API_PASSPHRASE"))
     chain_id: int = field(default_factory=lambda: int(_env("POLYMARKET_CHAIN_ID", "137")))
+    # task 20260818_2012 item 6: py_clob_client.ClobClient.__init__ takes a
+    # signature_type (0=EOA, 1=email/magic proxy, 2=browser proxy) that this
+    # codebase never passed -- if funder is a Polymarket proxy wallet, orders
+    # would sign against the wrong account. Defaults to 0 (EOA), matching
+    # py-clob-client's own default; set POLYMARKET_SIGNATURE_TYPE if funder
+    # is a proxy wallet. `make live preflight` prints the resolved value.
+    signature_type: int = field(default_factory=lambda: int(_env("POLYMARKET_SIGNATURE_TYPE", "0")))
 
     @property
     def has_l1(self) -> bool:
@@ -269,6 +276,44 @@ MAKING_LIVE_BANKROLL_CAP_USD = _env_float("MAKING_LIVE_BANKROLL_CAP_USD", 500.0)
 # good fills.
 MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE = int(_env_float("MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE", 5))
 MAKING_LIVE_KILL_MARKOUT_CENTS_PER_SHARE = _env_float("MAKING_LIVE_KILL_MARKOUT_CENTS_PER_SHARE", 2.0)
+
+# Absolute equity-drawdown halt (task 20260818_2012 item 5), separate from
+# the markout-based switch above: trips from fill #1, not after
+# MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE scored fills. Mirrors v1's
+# KILL_DRAWDOWN_FRACTION pattern, applied to bankroll_cap_usd rather than a
+# paper bankroll -- at the $100 default this is exactly -$15.
+MAKING_LIVE_KILL_DRAWDOWN_FRACTION = _env_float("MAKING_LIVE_KILL_DRAWDOWN_FRACTION", 0.15)
+
+# task item 1a/1b: Phase 0's MAKING_MAX_INVENTORY_PER_MARKET_FRACTION (0.02)
+# and the §4.3 cluster fractions above are sized for a bankroll many times
+# $500 -- at $100 they reject every market's minimum order size before it's
+# ever quoted (see the task's own arithmetic: a 20-share pair costs $20,
+# breaching a 15%-of-$100 entity cap on its own). These live-specific
+# overrides are sized instead for the live bankroll actually being risked:
+# MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION=0.25 means a single market
+# can be a quarter of a $100 book (~4-5 markets reachable) -- no smaller
+# fraction clears the venue's real min_size distribution at this bankroll.
+# The cluster fractions are each set above 0.25 so a single min-size quote
+# is never blocked by a cluster cap alone (a "floor" of one quote always
+# being permitted, per the task), with headroom for 2-3 markets sharing a
+# cluster. These are judgment calls, not derived constants -- override via
+# env if real fills suggest otherwise.
+MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION = _env_float("MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION", 0.25)
+MAKING_LIVE_MAX_ENTITY_CLUSTER_FRACTION = _env_float("MAKING_LIVE_MAX_ENTITY_CLUSTER_FRACTION", 0.35)
+MAKING_LIVE_MAX_THEME_CLUSTER_FRACTION = _env_float("MAKING_LIVE_MAX_THEME_CLUSTER_FRACTION", 0.50)
+MAKING_LIVE_MAX_DATE_BUCKET_FRACTION = _env_float("MAKING_LIVE_MAX_DATE_BUCKET_FRACTION", 0.40)
+MAKING_LIVE_MAX_RESOLUTION_SOURCE_FRACTION = _env_float("MAKING_LIVE_MAX_RESOLUTION_SOURCE_FRACTION", 0.40)
+
+# task item 5 "min notional": 20 shares at $0.03 is $0.60, under Polymarket's
+# ~$1 minimum order notional. A per-leg guard rather than raising
+# MAKING_MIN_PRICE globally, since that constant also gates Phase 0's paper
+# universe and shouldn't change for a live-only concern.
+MAKING_LIVE_MIN_NOTIONAL_USD = _env_float("MAKING_LIVE_MIN_NOTIONAL_USD", 1.0)
+
+# task item 4: bounds how late a markout horizon can be stamped. Outside
+# [horizon, horizon + slack] minutes old, the fill is left unscored rather
+# than stamping a stale reading -- see execution.py's compute_markouts.
+MAKING_LIVE_MARKOUT_WINDOW_SLACK_MINUTES = _env_float("MAKING_LIVE_MARKOUT_WINDOW_SLACK_MINUTES", 2.0)
 
 # --- Telegram notifications (optional) -------------------------------------------------
 # Forwards `poly03 paper run` console output to a Telegram chat. Unset by

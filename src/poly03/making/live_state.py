@@ -70,7 +70,13 @@ class LiveOrder:
     """One resting order we believe is live on the book. `size_matched` is
     the last size we observed filled as of the previous reconciliation --
     the execution engine diffs against it to find new fills without
-    double-counting a partial fill it already recorded."""
+    double-counting a partial fill it already recorded.
+
+    `tick_size`/`neg_risk` are the market's values at placement time, carried
+    on the order (and then the position, via `record_fill`) so a later
+    flatten of this token doesn't have to re-fetch them or guess -- see
+    `execution.py`'s `_flatten_market`.
+    """
 
     order_id: str
     market_id: str
@@ -84,6 +90,8 @@ class LiveOrder:
     size_matched: float = 0.0
     placed_at: str = field(default_factory=_now_iso)
     cluster_tags: dict[str, Any] = field(default_factory=dict)
+    tick_size: float = 0.01
+    neg_risk: bool = False
 
     @property
     def cluster(self) -> ClusterTags:
@@ -92,7 +100,12 @@ class LiveOrder:
 
 @dataclass
 class LiveInventory:
-    """Net position in one market, updated as fills are recorded."""
+    """Net position in **one token** of one market, updated as fills are
+    recorded. Book M can hold both a YES-token position (from a filled bid)
+    and a NO-token position (from a filled ask, see execution.py's NO-leg
+    routing) in the same market at once -- these are two separate
+    `LiveInventory` rows, keyed by `(market_id, token_id)` in
+    `LiveMakingState.position_for`, not one row per market."""
 
     market_id: str
     condition_id: str
@@ -102,10 +115,24 @@ class LiveInventory:
     avg_price: float = 0.0
     realized_pnl_usd: float = 0.0
     cluster_tags: dict[str, Any] = field(default_factory=dict)
+    tick_size: float = 0.01
+    neg_risk: bool = False
+    mark_price: float | None = None
 
     @property
     def collateral_usd(self) -> float:
         return abs(self.net_shares) * self.avg_price
+
+    @property
+    def market_value_usd(self) -> float:
+        """Mark-to-market value, falling back to cost basis before the
+        position has ever been marked (see execution.py's `_mark_to_market`).
+        This is what `LiveMakingState.equity_usd` sums over -- `collateral_usd`
+        stays cost-basis for the live-budget gate, which cares about capital
+        committed, not current P&L."""
+        if self.mark_price is None:
+            return self.collateral_usd
+        return abs(self.net_shares) * self.mark_price
 
     @property
     def cluster(self) -> ClusterTags:
@@ -149,6 +176,7 @@ class LiveMakingState:
     updated_at: str = field(default_factory=_now_iso)
     last_reconciled_at: str | None = None
     n_ticks: int = 0
+    one_sided_ticks: dict[str, int] = field(default_factory=dict)
 
     @property
     def open_positions(self) -> list[LiveInventory]:
@@ -156,11 +184,20 @@ class LiveMakingState:
 
     @property
     def deployed_collateral_usd(self) -> float:
+        """Cost-basis capital committed -- the denominator for the live
+        budget gate in execution.py's run_live_tick. Deliberately NOT
+        mark-to-market (see `equity_usd`); the budget is about capital
+        allocated, not current P&L."""
         return sum(p.collateral_usd for p in self.open_positions)
 
     @property
     def equity_usd(self) -> float:
-        return self.cash_usd + self.deployed_collateral_usd
+        """Mark-to-market equity. Was `cash_usd + deployed_collateral_usd`
+        (cost basis), which meant equity never moved with price and the
+        status line read flat while positions gained or lost value -- see
+        `LiveInventory.market_value_usd` and execution.py's
+        `_mark_to_market`."""
+        return self.cash_usd + sum(p.market_value_usd for p in self.open_positions)
 
     def orders_for(self, market_id: str) -> list[LiveOrder]:
         return [o for o in self.open_orders if o.market_id == market_id]
@@ -171,11 +208,42 @@ class LiveMakingState:
     def remove_order(self, order_id: str) -> None:
         self.open_orders = [o for o in self.open_orders if o.order_id != order_id]
 
-    def position_for(self, market_id: str, *, condition_id: str, token_id: str, question: str) -> LiveInventory:
+    def position_for_token(self, market_id: str, token_id: str) -> LiveInventory | None:
+        """Non-creating lookup -- use this to read exposure without
+        materializing an empty position row (e.g. execution.py's
+        inventory-skew net_shares read)."""
         for p in self.positions:
-            if p.market_id == market_id:
+            if p.market_id == market_id and p.token_id == token_id:
                 return p
-        pos = LiveInventory(market_id=market_id, condition_id=condition_id, token_id=token_id, question=question)
+        return None
+
+    def position_for(
+        self,
+        market_id: str,
+        *,
+        condition_id: str,
+        token_id: str,
+        question: str,
+        tick_size: float = 0.01,
+        neg_risk: bool = False,
+    ) -> LiveInventory:
+        """Keyed on `(market_id, token_id)`, not `market_id` alone -- Book M
+        can hold a YES-token position and a NO-token position in the same
+        market at once (see execution.py's NO-leg routing), and they must
+        not share one `net_shares`/`avg_price`. `tick_size`/`neg_risk` are
+        only stamped on creation; an existing position's values (from
+        whichever fill created it) are authoritative."""
+        existing = self.position_for_token(market_id, token_id)
+        if existing is not None:
+            return existing
+        pos = LiveInventory(
+            market_id=market_id,
+            condition_id=condition_id,
+            token_id=token_id,
+            question=question,
+            tick_size=tick_size,
+            neg_risk=neg_risk,
+        )
         self.positions.append(pos)
         return pos
 
@@ -192,6 +260,8 @@ class LiveMakingState:
         order_id: str,
         mid_price_at_fill: float = 0.0,
         fee_usd: float = 0.0,
+        tick_size: float = 0.01,
+        neg_risk: bool = False,
     ) -> LiveFill:
         """Apply one real fill (buy adds to inventory, sell reduces it) and
         update cash/avg price/realized P&L accordingly. This is the single
@@ -200,7 +270,14 @@ class LiveMakingState:
         collateral_usd = price * size_shares
         signed_shares = size_shares if side == "buy" else -size_shares
 
-        pos = self.position_for(market_id, condition_id=condition_id, token_id=token_id, question=question)
+        pos = self.position_for(
+            market_id,
+            condition_id=condition_id,
+            token_id=token_id,
+            question=question,
+            tick_size=tick_size,
+            neg_risk=neg_risk,
+        )
         new_net = pos.net_shares + signed_shares
 
         if pos.net_shares == 0.0 or (pos.net_shares > 0) == (signed_shares > 0):

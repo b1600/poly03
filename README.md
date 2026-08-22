@@ -28,6 +28,118 @@ Everything in `scan` and `backtest` works against **public, unauthenticated**
 Gamma/CLOB endpoints — `.env` is only needed once you wire in authenticated
 calls or (much later) order placement. Never commit `.env`.
 
+## Quickstart: $100 paper run vs. $100 micro-live
+
+Three different loops live here, and only one of them risks real money:
+
+|                | Book A paper run              | Book M Phase 0 (`make run`)        | Book M micro-live (`make live run`) |
+|----------------|--------------------------------|--------------------------------------|----------------------------------------|
+| doc            | `strategy_v1.md`               | `strategy_v2.md` §4 Phase 0          | `strategy_v2.md` §4 Phase 1            |
+| capital        | simulated, $0 real              | simulated, $0 real                    | **real USDC**                          |
+| orders placed  | never                           | never (measures the reward pool only) | only with `--live` (default is dry-run) |
+
+### $100 paper run (Book A, simulated, no credentials needed)
+
+```bash
+uv run poly03 paper run --bankroll 100
+```
+
+Starts (or resumes) `paper_state.json` with a $100 simulated bankroll and
+ticks every 30 minutes forever — leave it running in tmux/screen/systemd;
+Ctrl+C stops it and prints the §7 report.
+
+Expect `entered=0` for long stretches at this size, for two separate
+reasons, neither of which is a bug:
+- **sizing**: §4.1's 0.5% `base_fraction` of $100 rounds below Polymarket's
+  real per-market order-size floor most of the time (see the note further
+  down in the CLI section).
+- **the edge guard**: by default `BOOK_A_REQUIRE_EDGE_ESTIMATE=true`
+  (`config.py`), so Book A refuses to enter on the placeholder
+  `q = price + margin` at all — see "Known gaps" below. You'll see
+  `no_edge_estimate_available` in the decision log rather than a sizing
+  rejection.
+
+To see the pre-`strategy_v2.md` pipeline move for comparison (trading on
+the placeholder edge — only useful to sanity-check the machinery, not a
+real signal):
+
+```bash
+BOOK_A_REQUIRE_EDGE_ESTIMATE=false uv run poly03 paper run --bankroll 100
+```
+
+### Book M Phase 0 observation run (simulated, no credentials needed)
+
+`make run` only measures the reward pool — it never places an order or
+simulates a fill — so there's no real-money reason to cap it at $100.
+Reward `min_size` is 20-200 shares (~$20-200 notional) per order, and a
+$100 simulated bankroll can't clear that floor for most markets, so the
+observation series stays mostly empty. Use a bankroll comfortably above
+the venue's `min_size` distribution instead:
+
+```bash
+uv run poly03 make run --bankroll 10000
+```
+
+Leave it running — the §4 Phase 0 gate wants ≥200 ticks over ≥7 days
+before `poly03 make report` calls it READY. Console output is unbuffered
+and mirrors to `paper_trade.log` (override with `PAPER_TRADE_LOG_FILE`),
+so it's safe to background:
+
+```bash
+nohup uv run poly03 make run --bankroll 10000 > make_run.log 2>&1 &
+```
+
+Both loops default their state/log files relative to the working
+directory (`paper_state.json` / `paper_decisions.jsonl` for Book A,
+`making_state.json` / `making_decisions.jsonl` for Book M) — always
+launch from the repo root, or pass `--state-file` / `--log-file`
+explicitly, so you don't end up with two different state files silently
+diverging.
+
+### $100 micro-live (Book M, real orders, real money — read this first)
+
+Micro-live is Book M's §4 Phase 1: it places real resting limit orders on
+Polymarket, funded from your own wallet. Nothing here places an order
+until you pass `--live`; every command defaults to dry-run. The
+live-specific risk fractions in `config.py`
+(`MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION` etc.) are already sized
+for a bankroll around $100-500, so $100 is a reasonable first cap.
+
+```bash
+# 1. fill in .env with your L1 key (+ optional funder/proxy address) --
+#    L2 API creds are derived automatically the first time ClobClient runs
+cp .env.example .env   # if you haven't already
+
+# 2. sanity-check credentials, funder/signature_type, balance & allowance --
+#    doesn't place any orders
+uv run poly03 make live preflight --bankroll-cap 100
+
+# 3. dry-run first: shows what it *would* place/cancel, no network writes
+uv run poly03 make live run --bankroll-cap 100
+
+# 4. once the dry-run output looks right, go live with a $100 cap
+uv run poly03 make live run --bankroll-cap 100 --live
+```
+
+Notes:
+- `--bankroll-cap 100` overrides the `MAKING_LIVE_BANKROLL_CAP_USD`
+  default (500) — the bot will never deploy more than $100 of collateral
+  across resting quotes.
+- Ctrl+C (or a halt) cancels every tracked resting order before exiting —
+  it does not leave orders unattended.
+- `uv run poly03 make live status` / `make live report` show open
+  positions/orders, realized rewards/fees, fill rate, and adverse
+  selection once it's been running a while.
+- Expect an `IMPLAUSIBLE YIELD` warning on the first Phase 0 report
+  (`make report`) — it's a static snapshot that assumes the competing book
+  stays as thin as it is right now and charges nothing for adverse
+  selection. Let it run and watch whether the identified number holds up;
+  that's the input the whole Book M case rests on.
+- `signature_type`/funder address matter: if your wallet is a Polymarket
+  proxy wallet rather than a plain EOA, set `POLYMARKET_SIGNATURE_TYPE` and
+  `POLYMARKET_FUNDER_ADDRESS` in `.env` — `make live preflight` prints what
+  it detected so you can double check before the first `--live` run.
+
 ## Book M (`strategy_v2.md`) — reward-subsidized making
 
 `strategy_v1.md`'s Book A never traded: its edge gate was a tautology (`q` was

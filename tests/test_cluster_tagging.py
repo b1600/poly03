@@ -56,3 +56,19 @@ def test_release_frees_up_capacity(market_factory):
     assert tracker.would_breach(tags, 2_000) != []
     tracker.release(tags, 14_000)
     assert tracker.would_breach(tags, 2_000) == []
+
+
+def test_cap_fraction_overrides_apply_instead_of_module_defaults(market_factory):
+    """task 20260818_2012 item 1b: execution.py's live engine passes its own,
+    much larger MAKING_LIVE_MAX_*_CLUSTER_FRACTION knobs -- confirm the
+    tracker actually uses the override, not the §4.3 Phase 0 constant."""
+    m = market_factory("Will Trump do X?", group_item_title="Trump")
+    tags = tag_market(m)
+
+    default_tracker = ClusterExposureTracker(bankroll=100)
+    # 15% of 100 = 15 -- a $20 stake breaches the default entity cap.
+    assert default_tracker.would_breach(tags, 20) != []
+
+    live_tracker = ClusterExposureTracker(bankroll=100, entity_cap_fraction=0.35)
+    # 35% of 100 = 35 -- the same $20 stake fits under the override.
+    assert live_tracker.would_breach(tags, 20) == []

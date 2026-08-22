@@ -1,0 +1,107 @@
+I read the codebase and ran the live dry-run path against the real book to ground this. Here's what I found.
+
+Where the code already is
+
+Phase 1 execution is largely built (commit 11f0c6a): making/execution.py (place/cancel/reconcile/flatten/markout/kill-switch), making/live_state.py (real inventory, fills, payouts), making/live_measurement.py (fill rate, adverse selection, §4 gate), CLI poly03 make live tick|run|status|report|reset|record-reward, and the write methods in data/clob.py:121-180. Dry-run is the default everywhere. So this is not a "build it" job — it's a "make it work at $100, and fix what real money exposes" job.
+
+The blocking finding: at $100 it places zero orders
+
+I ran it (dry-run, --bankroll-cap 100):
+
+quotable=47 would_place=0   skipped: reward_min_size_exceeds_inventory_cap=34, cluster_cap=6
+
+All 40 selected markets rejected. Two independent arithmetic reasons:
+
+1. Per-market inventory cap. _inventory_cap_shares (making/engine.py:64) = 0.02 × bankroll / price. At $100, mid 0.50 → 4 shares. The venue's min_size is 20 shares in the best case (I sampled 3,904 funded markets: min_size is 20 for 2,212, 50 for 779, 30 for 704, 100+ for the rest). Below min_size an order scores zero, so execution.py:528 correctly refuses — it just refuses everything.
+2. Cluster caps. A symmetric two-sided pair costs exactly n dollars of collateral (n·p + n·(1−p)), so a 20-share pair = $20. MAX_ENTITY_CLUSTER_FRACTION is 15% → $15 at a $100 bankroll. Every market breaches the entity cap before it's ever quoted.
+
+At $500 these were marginal (the log shows the same two skips). At $100 they're absolute.
+
+What $100 can actually earn
+
+Same live universe, computing our Q vs. the resting book Q per market:
+
+quotable=48   affordable at <=$20.5 collateral = 6   (the other 42 need $50-$200/market)
+
+  $/day   coll  size  pool/d   share   question
+  0.592  19.80    20     3.0  19.7%   Russia/Ukraine diplomatic meeting
+  0.217  19.82    20    50.0   0.4%   Israel action vs Greater Beirut
+  0.033  19.24    20     5.0   0.7%   Gold hits $4,700 in August
+  0.026  19.80    20     3.0   0.9%   Bab el-Mandeb closed
+  0.024  19.98    20    13.0   0.2%   Becerra wins CA Governor
+
+top-5 book: deployed $98.64  →  est $0.89/day gross (0.90%/day)
+
+That $0.89/day is the Phase-0 reconstruction, which rewards.py and every report say is an upper bound. Two things follow: only ~12% of the quotable universe is even reachable at $100 (the selector currently ranks by reward_density and takes the top 40, which are almost all unaffordable — see change 1c), and the loss budget is thin. 1¢/share of adverse selection over the gate's 500 fills × 20 shares = $100, the entire book. So the drawdown control matters more than the yield here.
+
+Changes required, in dependency order
+
+1. Sizing/caps — otherwise nothing trades
+
+- a. Split the per-market inventory cap into a live knob (MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION), set so frac × 100 / price ≥ min_size across the quotable price band — that's ~0.20–0.25. Say plainly in the config comment what that means: at $100 a single market is a quarter of the book, and no parameter choice avoids that.
+- b. Same for cluster caps — a live set, or a floor of "one min-size quote is always permitted." As written they cannot bind at $100 without blocking everything.
+- c. Make selection affordability-aware: drop markets whose min_size collateral exceeds the per-market budget before the top-40 cut, and rank by estimated $/day per dollar of collateral. Right now the 40 slots go to markets we can't afford.
+- d. target_shares = qm.reward.min_size exactly (execution.py:529) means any inventory skew suppresses the adding side entirely (quoting.py:150-163), leaving a one-sided quote that scores zero (combine_sides). At $100 you'll be one-sided a lot. Either budget ≥2× min_size per market (→ ~2 markets, not 5) or accept and measure the unrewarded-inventory time.
+
+2. The ask leg cannot be placed as written — biggest correctness fix
+
+_place_side (execution.py:344) posts both legs against qm.yes_token_id, with the ask as SELL. Polymarket has no naked shorting: a SELL requires holding those YES shares. Starting flat, every ask is rejected, which leaves a one-sided bid — zero rewards, pure directional accumulation, the exact opposite of the strategy. The ask must be routed as a BUY on the NO token at 1 − ask_price (no_token_id is already carried on QuotableMarket and never used). That pulls in:
+
+- LiveInventory is keyed by market with a single token_id/net_shares (live_state.py:93-112) — it needs per-token inventory, or YES and NO netting will be wrong.
+- compute_markouts and _flatten_market must use the per-leg token.
+- Worth confirming against the rewards docs (or the first real payout) that a NO bid is scored as a YES ask — I'd treat it as the working assumption, not a fact.
+
+3. Loop cadence — otherwise you're measuring your own latency
+
+MAKING_REQUOTE_MID_MOVE_CENTS is 1¢, but make live run defaults to a 1800s interval and each tick re-scans the whole universe. Measured from Phase 0's 2,532 ticks: median gap 312s, min 146s — a scan costs 2.5–5 minutes. Quotes sit stale for 30 minutes; that is the adverse-selection channel §3.4 names. Split the loop: cache the universe (refresh every 15–30 min) and run a fast quote/reconcile cycle every 30–60s that only fetches books for markets we hold or quote.
+
+4. Markout measurement is wrong, and the gate rests on it
+
+compute_markouts (execution.py:249-263) stamps markout_5m on any fill ≥5 min old using the current mid. On a 30-min tick, the "5m markout" is actually a 30–60m markout, and the reference is quoted_midpoint, which can be 30 minutes stale. Capture the mid at reconcile time and only stamp each horizon inside a bounded age window; leave it None if the window was missed. Everything in live_measurement.py and the kill switch is downstream of this number.
+
+5. Safety gaps that matter with real money
+
+- No cancel on shutdown or on halt. Ctrl+C leaves orders resting unattended; when state.halted trips, run_live_tick returns at execution.py:480 without cancelling anything still in the universe. Both should cancel_all (or cancel-tracked).
+- The adverse-selection kill switch needs 5 scored fills — at $100 that could be days of exposure. Add an absolute equity-drawdown halt (e.g. −$15) that works from fill #1.
+- _flatten_market hardcodes tick_size=0.01, neg_risk=False (execution.py:437-438) — wrong for 0.001-tick and neg-risk markets; the neg-risk flag changes which exchange contract the order is signed against. _place_side gets this right; flatten doesn't.
+- placed_any = True is set even when _place_side errored out (execution.py:575), charging budget and cluster exposure for orders that don't exist. And if leg 1 succeeds and leg 2 fails you're silently one-sided — needs paired placement with rollback.
+- No idempotent client order IDs (your 20260818_tasks.txt item 1 calls for this). A retry after a timeout can double-place.
+- Min notional: 20 shares at price 0.03 is $0.60, under Polymarket's ~$1 minimum. MAKING_MIN_PRICE is 0.02 — either raise it for live or add a per-leg notional guard.
+
+6. Credentials and preflight
+
+- Credentials has no signature_type, but py_clob_client.ClobClient.__init__ takes one (0 = EOA, 1 = email/magic proxy, 2 = browser proxy). data/clob.py:46-52 passes funder without it. If your funder is a Polymarket proxy wallet, orders sign against the wrong account. This needs to be right before the first --live.
+- Add poly03 make live preflight: L1+L2 creds present, USDC balance ≥ cap, CTF/exchange allowances set, get_open_orders() round-trips, and signature_type/funder resolve to the address holding the money. Note create_order needs the L1 private key too — _require_l2 only checks L2.
+- The halt path only logs; 20260818_tasks.txt item 0 wants it to page you. Telegram is already wired in make live run.
+
+7. Measurement honesty
+
+- LiveInventory.collateral_usd values inventory at cost, so equity_usd never moves with price — the status line reads flat while you're losing. Mark to market before you rely on it at this size.
+- Reward payouts are manual (record-reward). At $100 they're cents/day; if you don't log them the gate can never pass.
+- No tests exist for making/execution.py or live_state.py. The NO-leg routing, reconciliation diffing, and markout windowing all need tests before real capital, not after.
+
+Recommendation on the $100 itself
+
+$100 buys ~5 min-size markets, ~$0.89/day of estimated gross reward, and 12% coverage of the quotable universe. That is enough to validate plumbing — do orders rest, do fills reconcile exactly, do fees and rewards actually land, do markouts compute — but the §4 gate wants 500 fills, which at this size means turning ~$5k of notional through a $100 book while a 1¢/share adverse-selection regime would wipe it out.
+
+So I'd reframe rather than rescale: run $100 as Phase 1a, an execution shakedown, with its own explicit and much smaller gate (say ≥20 fills, zero reconciliation drift, realized-vs-estimated reward ratio observed at all), on 1–2 markets first per your own sequencing note. Keep the 500-fill §4 gate where it is and fund to $500 to actually clear it. That's a config/gate addition, not a change to the strategy.
+
+Ordering I'd implement in: 2 → 1 → 5 → 4 → 6 → 3 → 7. Item 2 is the one that makes the strategy work at all; item 3 is the largest refactor and can follow the first live fills.
+
+
+
+--------------------------18 Aug 2026 20:46
+Finish editing codes in 25 minutes.
+
+All 7 items from 20260818_2012_task.txt are implemented, in the requested order (2→1→5→4→6→3→7), with the full test suite passing (148 tests, including 10 new ones) and live verification against the real order book (read-only, no --live orders placed).
+
+Key results:
+- Item 2 (NO-leg routing): the ask leg now posts as a BUY on the NO token at 1-price instead of a naked SELL on YES. Verified against the real book: would_place went from 0 → 4, with distinct token IDs and correctly complemented prices for each market's two legs.
+- Item 1 (sizing/caps): live-specific inventory (0.25) and cluster-fraction knobs, affordability-aware market ranking. Confirmed real dry-run now selects and quotes markets at $100 that previously all got rejected.
+- Item 5 (safety): cancel-on-halt/shutdown, absolute drawdown kill switch, paired-placement rollback (verified: a failed ask leg correctly rolls back the successful bid leg), untracked-order adoption on reconcile, min-notional guard.
+- Item 4 (markouts): bounded scoring window (verified: a late fill correctly stays unscored instead of getting a stale reading) and mid captured at reconcile time instead of order-placement time.
+- Item 6 (credentials/preflight): signature_type wired through to py-clob-client, new make live preflight command — ran it against your actual .env credentials: L1/L2 present, funder resolves, get_open_orders() round-trips, balance/allowance both read $0 (wallet not yet funded, correctly flagged as WARN).
+- Item 3 (loop cadence): universe scan split from the reconcile/quote cycle; make live run now defaults to a 45s tick with a separate 1800s universe refresh.
+- Item 7 (measurement): mark-to-market equity, reward-payout and one-sided-time reminders in make live report, plus tests/test_making_execution.py.
+
+One thing worth flagging: your .env already has real L1/L2 credentials configured, and the funder address resolved successfully — so this repo is genuinely close to being able to go --live. Nothing in this session placed a real order or touched --live; that's still your call. Before it, I'd run poly03 make live preflight again once the wallet is funded, and double-check the signature_type/funder note it prints matches your actual wallet setup.

@@ -501,17 +501,40 @@ def _report_line(report, state) -> str:
 
 
 def cmd_make_live_tick(args: argparse.Namespace) -> None:
-    from poly03.making.execution import run_live_tick
+    from poly03.data.clob import ClobClient
+    from poly03.data.gamma import GammaClient
+    from poly03.making.execution import cancel_all_tracked, refresh_universe, run_live_tick
     from poly03.making.live_state import load_state, save_state
+    from poly03.notify.telegram import send_message
 
     state = load_state(args.state_file)
+    clob = ClobClient()
     if state.halted and not args.force:
         _log("HALTED: Book M live state is halted. Investigate before continuing. Re-run with --force to tick anyway.")
+        # task item 5/6: a halted state must not leave orders resting
+        # unattended even when this one-shot invocation refuses to do
+        # anything else (e.g. a cron/systemd `tick` call), and the halt
+        # should page, not just log -- best-effort, no buffering needed for
+        # a single command.
+        cancel_report = cancel_all_tracked(state, clob, dry_run=not args.live, decision_log_path=args.log_file)
+        save_state(state, args.state_file)
+        if cancel_report.cancelled:
+            _log(f"  cancelled {len(cancel_report.cancelled)} tracked order(s) while halted")
+        for e in cancel_report.errors:
+            _log(f"  error: {e}")
+        send_message(f"Book M HALTED: {'; '.join(state.halt_reasons)}")
         return
 
+    # A single-shot `tick` invocation always scans fresh -- there's no
+    # cross-process cache to reuse (see `make live run`'s cached-universe
+    # loop, task item 3).
+    gamma = GammaClient()
+    universe = refresh_universe(gamma, clob, max_gamma_markets=args.max_markets)
     report = run_live_tick(
         state,
-        max_gamma_markets=args.max_markets,
+        universe=universe,
+        gamma=gamma,
+        clob=clob,
         max_markets_quoted=args.max_quoted,
         dry_run=not args.live,
         decision_log_path=args.log_file,
@@ -598,6 +621,21 @@ def cmd_make_live_report(args: argparse.Namespace, log=_log) -> None:
     log(f"  capture (reward + spread capture - fees): ${adv.capture_usd:,.2f}")
     log(f"  net (capture - adverse selection): ${adv.net_usd:+,.2f}")
 
+    if state.fills and not state.reward_payouts:
+        log(
+            "\nNOTE: fills recorded but no reward payouts logged yet -- the §4 gate can't pass without "
+            "them. Log observed payouts with `make live record-reward` as they land."
+        )
+
+    if state.one_sided_ticks:
+        # task item 1d: min_size is quoted exactly, so full inventory skew
+        # fully suppresses the adding side rather than sizing it down --
+        # tracked (not structurally avoided) so this shows how much time
+        # each market spent one-sided.
+        log("\none-sided ticks (inventory skew fully suppressed a side, scored zero on it):")
+        for market_id, n in sorted(state.one_sided_ticks.items(), key=lambda kv: -kv[1]):
+            log(f"  {market_id}: {n} tick(s)")
+
     log("\n--- §4 Phase 1 gate ---")
     log(m.phase1_gate(state).summary())
 
@@ -623,6 +661,53 @@ def cmd_make_live_reset(args: argparse.Namespace) -> None:
     _log(f"Book M live state reset: bankroll_cap=${cap:,.2f}  state_file={args.state_file}")
 
 
+def cmd_make_live_preflight(args: argparse.Namespace) -> None:
+    """task item 6: everything that needs to be right before the first
+    --live, checked without placing an order. Informative, not a hard gate
+    on other commands -- prints FAIL/WARN and exits, doesn't raise."""
+    from poly03.config import get_credentials
+    from poly03.data.clob import ClobClient
+
+    creds = get_credentials()
+    _log("=== Book M live preflight ===")
+    _log(f"L1 private key present: {creds.has_l1}")
+    _log(f"L2 API creds present:   {creds.has_l2}")
+    _log(f"funder address:         {creds.funder_address or '(not set)'}")
+    _log(f"signature_type:         {creds.signature_type}  (0=EOA, 1=email/magic proxy, 2=browser proxy)")
+    _log(
+        "  -> confirm the funder address and signature_type above match the wallet that actually "
+        "holds your USDC. This can't be checked automatically -- a mismatch signs orders against "
+        "the wrong account."
+    )
+
+    if not (creds.has_l1 and creds.has_l2 and creds.funder_address):
+        _log("\nFAIL: missing required credentials (need POLYMARKET_PRIVATE_KEY, L2 API creds, and "
+             "POLYMARKET_FUNDER_ADDRESS). Run ClobClient.derive_api_creds() once L1 is set.")
+        return
+
+    clob = ClobClient(creds)
+
+    try:
+        orders = clob.get_open_orders()
+        _log(f"\nget_open_orders() round-trip OK: {len(orders)} open order(s) on this account")
+    except Exception as exc:
+        _log(f"\nFAIL: get_open_orders() failed: {exc}")
+        return
+
+    try:
+        balance_usd, allowance_usd = clob.get_usdc_balance_allowance()
+        _log(f"USDC balance:   ${balance_usd:,.2f}")
+        _log(f"USDC allowance: ${allowance_usd:,.2f}")
+        if balance_usd < args.bankroll_cap:
+            _log(f"WARN: balance is below --bankroll-cap (${args.bankroll_cap:,.2f})")
+        if allowance_usd <= 0:
+            _log("WARN: exchange allowance is zero -- orders will rest but can't fill until you approve on-chain")
+    except Exception as exc:
+        _log(f"WARN: could not fetch balance/allowance: {exc}")
+
+    _log("\npreflight complete.")
+
+
 def cmd_make_live_run(args: argparse.Namespace) -> None:
     """§4 Phase 1: tick on an interval. Dry-run (report only, no network
     writes) unless --live is passed -- see making/execution.py's module
@@ -631,7 +716,9 @@ def cmd_make_live_run(args: argparse.Namespace) -> None:
     from pathlib import Path
 
     from poly03.config import MAKING_LIVE_BANKROLL_CAP_USD
-    from poly03.making.execution import run_live_tick
+    from poly03.data.clob import ClobClient
+    from poly03.data.gamma import GammaClient
+    from poly03.making.execution import cancel_all_tracked, refresh_universe, run_live_tick
     from poly03.making.live_state import LiveMakingState, load_state, save_state
     from poly03.notify.telegram import TelegramReporter
 
@@ -649,7 +736,21 @@ def cmd_make_live_run(args: argparse.Namespace) -> None:
         notifier.log(f"started Book M live state: bankroll_cap=${cap:,.2f}  state_file={args.state_file}")
 
     mode = "LIVE -- real orders will be placed" if args.live else "DRY-RUN -- no orders placed, no network writes"
-    notifier.log(f"ticking every {args.interval}s [{mode}]. Ctrl+C to stop.\n")
+    notifier.log(
+        f"ticking every {args.interval}s, universe refreshed every {args.universe_refresh_interval}s [{mode}]. "
+        "Ctrl+C to stop.\n"
+    )
+    notifier.flush()
+
+    # task item 3: the Gamma+CLOB scan is the expensive part of a tick
+    # (measured 2.5-5 min) -- cache it and only refresh on its own interval,
+    # so the reconcile/quote cycle can run every 30-60s without re-scanning
+    # the whole universe each time (see refresh_universe's docstring).
+    gamma = GammaClient()
+    clob = ClobClient()
+    universe = refresh_universe(gamma, clob, max_gamma_markets=args.max_markets)
+    next_universe_refresh_at = time.monotonic() + args.universe_refresh_interval
+    notifier.log(f"universe scan: {len(universe.quotable)} quotable market(s)")
     notifier.flush()
 
     try:
@@ -658,16 +759,35 @@ def cmd_make_live_run(args: argparse.Namespace) -> None:
                 notifier.log("HALTED: investigate before continuing. Re-run with --force to override.")
                 notifier.flush()
                 break
+            if time.monotonic() >= next_universe_refresh_at:
+                try:
+                    universe = refresh_universe(gamma, clob, max_gamma_markets=args.max_markets)
+                    notifier.log(f"universe refreshed: {len(universe.quotable)} quotable market(s)")
+                except Exception as exc:
+                    logger.warning("universe refresh failed, reusing cached universe: %s", exc)
+                next_universe_refresh_at = time.monotonic() + args.universe_refresh_interval
             try:
                 report = run_live_tick(
                     state,
-                    max_gamma_markets=args.max_markets,
+                    universe=universe,
+                    gamma=gamma,
+                    clob=clob,
                     max_markets_quoted=args.max_quoted,
                     dry_run=not args.live,
                     decision_log_path=args.log_file,
                 )
                 save_state(state, args.state_file)
                 notifier.log(_report_line(report, state))
+                if state.halted:
+                    # task item 6: page the moment a halt trips, not one full
+                    # --interval late (the old code only re-checked
+                    # state.halted at the top of the *next* iteration, after
+                    # sleeping) -- run_live_tick has already cancelled
+                    # tracked orders internally by this point.
+                    notifier.log(f"HALTED: {'; '.join(state.halt_reasons)}")
+                    notifier.flush()
+                    if not args.force:
+                        break
             except Exception as exc:
                 logger.warning("live tick failed, will retry next interval: %s", exc)
             notifier.flush()
@@ -675,6 +795,16 @@ def cmd_make_live_run(args: argparse.Namespace) -> None:
     except KeyboardInterrupt:
         notifier.log("\nstopping (Ctrl+C received)...")
     finally:
+        # task item 5: Ctrl+C (or any other exit from the loop) must not
+        # leave orders resting unattended.
+        try:
+            cancel_report = cancel_all_tracked(state, clob, dry_run=not args.live, decision_log_path=args.log_file)
+            if cancel_report.cancelled:
+                notifier.log(f"cancelled {len(cancel_report.cancelled)} tracked order(s) on shutdown")
+            for e in cancel_report.errors:
+                notifier.log(f"  error: {e}")
+        except Exception as exc:
+            logger.warning("cancel-on-shutdown failed: %s", exc)
         save_state(state, args.state_file)
         notifier.log(
             f"\nfinal equity: ${state.equity_usd:,.2f}  open positions: {len(state.open_positions)}  "
@@ -820,6 +950,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_lreport.add_argument("--phase0-state-file", default=MAKING_STATE_FILE, help="Phase 0 state file to compare the realized reward rate against")
     p_lreport.set_defaults(func=cmd_make_live_report)
 
+    from poly03.config import MAKING_LIVE_BANKROLL_CAP_USD
+
+    p_lpreflight = live_sub.add_parser(
+        "preflight", help="check credentials, funder/signature_type, balance/allowance before the first --live"
+    )
+    p_lpreflight.add_argument("--bankroll-cap", type=float, default=MAKING_LIVE_BANKROLL_CAP_USD)
+    p_lpreflight.set_defaults(func=cmd_make_live_preflight)
+
     p_lreward = live_sub.add_parser(
         "record-reward",
         help="manually log an observed reward payout (rewards aren't reconcilable per-order, see live_state.py)",
@@ -838,7 +976,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_lrun = live_sub.add_parser("run", help="tick forever on an interval, Ctrl+C to stop")
     _add_live_args(p_lrun)
     p_lrun.add_argument("--bankroll-cap", type=float, default=None)
-    p_lrun.add_argument("--interval", type=int, default=1800)
+    p_lrun.add_argument(
+        "--interval",
+        type=int,
+        default=45,
+        help="seconds between reconcile/quote cycles (default 45s -- task item 3: this no longer re-scans "
+        "the universe, see --universe-refresh-interval)",
+    )
+    p_lrun.add_argument(
+        "--universe-refresh-interval",
+        type=int,
+        default=1800,
+        help="seconds between Gamma/CLOB universe scans (default 1800s = 30min)",
+    )
     p_lrun.add_argument("--force", action="store_true", help="keep running even if state is halted")
     p_lrun.add_argument("--phase0-state-file", default=MAKING_STATE_FILE, help="Phase 0 state file to compare the realized reward rate against")
     p_lrun.set_defaults(func=cmd_make_live_run)

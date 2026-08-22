@@ -1,0 +1,17 @@
+{
+  "bankroll_cap_usd": 100.0,
+  "cash_usd": 100.0,
+  "positions": [],
+  "open_orders": [],
+  "fills": [],
+  "reward_payouts": [],
+  "realized_reward_usd_total": 0.0,
+  "realized_fee_usd_total": 0.0,
+  "halted": false,
+  "halt_reasons": [],
+  "created_at": "2026-08-22T13:47:31.466276+00:00",
+  "updated_at": "2026-08-22T14:25:33.768988+00:00",
+  "last_reconciled_at": "2026-08-22T14:25:25.907624+00:00",
+  "n_ticks": 48,
+  "one_sided_ticks": {}
+}

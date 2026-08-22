@@ -48,6 +48,7 @@ class ClobClient:
             chain_id=self.creds.chain_id,
             key=self.creds.private_key,
             creds=api_creds,
+            signature_type=self.creds.signature_type,
             funder=self.creds.funder_address,
         )
 
@@ -178,6 +179,40 @@ class ClobClient:
             return self._client.get_order(order_id)
         except Exception:
             return None
+
+    def get_usdc_balance_allowance(self) -> tuple[float, float]:
+        """USDC collateral balance/allowance for the funder address, for
+        `make live preflight` (task item 6). Returns (balance_usd,
+        allowance_usd) -- raw units off the endpoint are USDC's 6 decimals.
+        Requires L2 creds, same as the other account-scoped calls.
+
+        get_balance_allowance() reads a value the CLOB API caches server-side
+        -- it does not reflect a fresh on-chain approve() until something
+        calls update_balance_allowance() at least once, which is why a real
+        allowance can still read $0.00 right after approving on-chain. Call
+        it first (best-effort; the read below still works even if this
+        fails) so preflight self-heals instead of reporting stale zeros."""
+        self._require_l2()
+        from py_clob_client.clob_types import AssetType, BalanceAllowanceParams
+
+        params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL, signature_type=self.creds.signature_type)
+        try:
+            self._client.update_balance_allowance(params)
+        except Exception:
+            pass
+        resp = self._client.get_balance_allowance(params)
+        balance = float(resp.get("balance") or 0) / 1_000_000.0
+        # The endpoint returns per-contract approvals under an `allowances`
+        # dict (CTF Exchange, Neg Risk Exchange, Neg Risk Adapter), not a
+        # single `allowance` scalar -- reading the latter always came back
+        # empty/0 even when fully approved. Report the smallest per-contract
+        # approval, since any one of them being unapproved blocks fills.
+        per_contract = resp.get("allowances") or {}
+        if per_contract:
+            allowance = min(float(v) for v in per_contract.values()) / 1_000_000.0
+        else:
+            allowance = float(resp.get("allowance") or 0) / 1_000_000.0
+        return balance, allowance
 
     def iter_sampling_markets(self, *, max_markets: int | None = None) -> Iterable[dict]:
         """Yield raw CLOB markets from /sampling-markets -- the authoritative

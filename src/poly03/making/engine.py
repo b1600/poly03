@@ -61,11 +61,16 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _inventory_cap_shares(bankroll: float, price: float) -> float:
-    """§3.4 per-market inventory cap, converted from USD to shares."""
+def _inventory_cap_shares(bankroll: float, price: float, fraction: float = MAKING_MAX_INVENTORY_PER_MARKET_FRACTION) -> float:
+    """§3.4 per-market inventory cap, converted from USD to shares.
+    `fraction` defaults to Phase 0's constant; execution.py's live engine
+    passes MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION instead -- Phase 0's
+    bankroll is orders of magnitude larger than Phase 1's real bankroll_cap,
+    so the same fraction would reject every market's min_size at live scale
+    (task 20260818_2012 item 1a)."""
     if price <= 0:
         return 0.0
-    return (MAKING_MAX_INVENTORY_PER_MARKET_FRACTION * bankroll) / price
+    return (fraction * bankroll) / price
 
 
 def run_tick(
