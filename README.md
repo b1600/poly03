@@ -96,14 +96,25 @@ launch from the repo root, or pass `--state-file` / `--log-file`
 explicitly, so you don't end up with two different state files silently
 diverging.
 
-### $100 micro-live (Book M, real orders, real money — read this first)
+### Micro-live (Book M, real orders, real money — read this first)
 
-Micro-live is Book M's §4 Phase 1: it places real resting limit orders on
-Polymarket, funded from your own wallet. Nothing here places an order
-until you pass `--live`; every command defaults to dry-run. The
-live-specific risk fractions in `config.py`
-(`MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION` etc.) are already sized
-for a bankroll around $100-500, so $100 is a reasonable first cap.
+Micro-live places real resting limit orders on Polymarket, funded from your
+own wallet. Nothing here places an order until you pass `--live`; every
+command defaults to dry-run.
+
+Sizing depends on `--bankroll-cap`: below $500 the engine uses the loosened
+`MAKING_LIVE_MAX_*_FRACTION` knobs in `config.py`, tuned so a sub-$500
+bankroll can still clear the venue's minimum order size. At `--bankroll-cap
+500` or above it switches to Phase 0's own sizing fractions
+(`execution.py`'s `_sizing_fractions`), since those already clear min_size
+at that scale. There are accordingly two different things you can run:
+
+#### $500 micro-live — strategy_v2.md §4 Phase 1
+
+This is the run the strategy doc actually specifies: "real resting orders,
+minimum viable size … gate to phase 2: rewards + rebate + spread capture
+exceed realized adverse selection over ≥500 fills" (§4). It needs ~$500 of
+real capital in your wallet and is meant to run for about two weeks.
 
 ```bash
 # 1. fill in .env with your L1 key (+ optional funder/proxy address) --
@@ -112,19 +123,45 @@ cp .env.example .env   # if you haven't already
 
 # 2. sanity-check credentials, funder/signature_type, balance & allowance --
 #    doesn't place any orders
-uv run poly03 make live preflight --bankroll-cap 100
+uv run poly03 make live preflight --bankroll-cap 500
 
 # 3. dry-run first: shows what it *would* place/cancel, no network writes
-uv run poly03 make live run --bankroll-cap 100
+uv run poly03 make live run --bankroll-cap 500
 
-# 4. once the dry-run output looks right, go live with a $100 cap
+# 4. once the dry-run output looks right, go live with a $500 cap
+uv run poly03 make live run --bankroll-cap 500 --live
+
+# 5. check gate status any time -- realized vs. estimated, fill rate,
+#    adverse selection, and the >=500-fill §4 gate itself
+uv run poly03 make live report
+```
+
+`--bankroll-cap 500` matches the `MAKING_LIVE_BANKROLL_CAP_USD` default, so
+it's equivalent to omitting the flag — passing it explicitly here just makes
+the cap visible in the command.
+
+#### $100 micro-live — execution shakedown, not the §4 gate
+
+A smaller, unofficial first step: validates that orders rest, fills
+reconcile, fees/rewards land, and markouts compute, on real money but at a
+bankroll strategy_v2.md itself says isn't economically workable (§3.2: "the
+binding minimum is now $50–$200/order, so $10k is a workable bankroll and
+$100 is not"). Treat it as plumbing validation before committing the full
+$500, not as a substitute for the §4 gate above — the fill-count gate stays
+at 500 either way, so a $100 run realistically won't clear it.
+
+```bash
+uv run poly03 make live preflight --bankroll-cap 100
+uv run poly03 make live run --bankroll-cap 100
 uv run poly03 make live run --bankroll-cap 100 --live
 ```
 
-Notes:
-- `--bankroll-cap 100` overrides the `MAKING_LIVE_BANKROLL_CAP_USD`
-  default (500) — the bot will never deploy more than $100 of collateral
-  across resting quotes.
+`--bankroll-cap 100` overrides the `MAKING_LIVE_BANKROLL_CAP_USD` default
+(500) — the bot will never deploy more than $100 of collateral across
+resting quotes.
+
+#### Notes (both sizes)
+
 - Ctrl+C (or a halt) cancels every tracked resting order before exiting —
   it does not leave orders unattended.
 - `uv run poly03 make live status` / `make live report` show open

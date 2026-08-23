@@ -6,9 +6,12 @@ from poly03.classifier.rules import Classification
 from poly03.classifier.taxonomy import Tier
 from poly03.data.models import OrderBook
 from poly03.making.execution import (
+    _PHASE0_SIZING,
+    _SHAKEDOWN_SIZING,
     LiveTickReport,
     _place_side,
     _rank_affordable,
+    _sizing_fractions,
     check_adverse_selection_kill_switch,
     check_drawdown_kill_switch,
     compute_markouts,
@@ -218,6 +221,19 @@ def test_partial_leg_failure_rolls_back_the_successful_leg(market_factory):
     assert state.open_orders == []
     assert clob.cancelled  # the bid leg that succeeded got cancelled
     assert any("rolled back" in e for e in report.errors)
+
+
+# --- sizing fractions (Phase 0 vs. $100-shakedown) --------------------------
+
+
+def test_sizing_fractions_below_500_uses_shakedown_knobs():
+    assert _sizing_fractions(100.0) == _SHAKEDOWN_SIZING
+    assert _sizing_fractions(499.99) == _SHAKEDOWN_SIZING
+
+
+def test_sizing_fractions_at_or_above_500_uses_phase0_defaults():
+    assert _sizing_fractions(500.0) == _PHASE0_SIZING
+    assert _sizing_fractions(1000.0) == _PHASE0_SIZING
 
 
 # --- affordability ranking (task item 1c) -----------------------------------

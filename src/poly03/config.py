@@ -289,7 +289,7 @@ MAKING_LIVE_KILL_DRAWDOWN_FRACTION = _env_float("MAKING_LIVE_KILL_DRAWDOWN_FRACT
 # $500 -- at $100 they reject every market's minimum order size before it's
 # ever quoted (see the task's own arithmetic: a 20-share pair costs $20,
 # breaching a 15%-of-$100 entity cap on its own). These live-specific
-# overrides are sized instead for the live bankroll actually being risked:
+# overrides are sized instead for a sub-$500 shakedown bankroll:
 # MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION=0.25 means a single market
 # can be a quarter of a $100 book (~4-5 markets reachable) -- no smaller
 # fraction clears the venue's real min_size distribution at this bankroll.
@@ -298,6 +298,13 @@ MAKING_LIVE_KILL_DRAWDOWN_FRACTION = _env_float("MAKING_LIVE_KILL_DRAWDOWN_FRACT
 # being permitted, per the task), with headroom for 2-3 markets sharing a
 # cluster. These are judgment calls, not derived constants -- override via
 # env if real fills suggest otherwise.
+#
+# Only used below a $500 bankroll_cap_usd, though -- execution.py's
+# _sizing_fractions falls back to Phase 0's own fractions (above) once the
+# cap reaches the original $500 Phase 1 design point, since Phase 0 sizing
+# already clears min_size at that scale (task: "at $500 these were marginal
+# ... not absolute") and there's no reason to run the full-size book on
+# knobs tuned for a $100 shakedown.
 MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION = _env_float("MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION", 0.25)
 MAKING_LIVE_MAX_ENTITY_CLUSTER_FRACTION = _env_float("MAKING_LIVE_MAX_ENTITY_CLUSTER_FRACTION", 0.35)
 MAKING_LIVE_MAX_THEME_CLUSTER_FRACTION = _env_float("MAKING_LIVE_MAX_THEME_CLUSTER_FRACTION", 0.50)

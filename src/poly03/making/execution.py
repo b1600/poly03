@@ -59,8 +59,13 @@ from poly03.config import (
     MAKING_LIVE_MAX_RESOLUTION_SOURCE_FRACTION,
     MAKING_LIVE_MAX_THEME_CLUSTER_FRACTION,
     MAKING_LIVE_MIN_NOTIONAL_USD,
+    MAKING_MAX_INVENTORY_PER_MARKET_FRACTION,
     MAKING_MAX_MARKETS_QUOTED,
     MAKING_REQUOTE_MID_MOVE_CENTS,
+    MAX_DATE_BUCKET_FRACTION,
+    MAX_ENTITY_CLUSTER_FRACTION,
+    MAX_RESOLUTION_SOURCE_FRACTION,
+    MAX_THEME_CLUSTER_FRACTION,
 )
 from poly03.data.clob import ClobClient
 from poly03.data.gamma import GammaClient
@@ -624,6 +629,45 @@ def _flatten_market(
         _flatten_position(state, clob, pos, report, dry_run=dry_run, decision_log_path=decision_log_path)
 
 
+@dataclass(frozen=True)
+class _SizingFractions:
+    inventory: float
+    entity: float
+    theme: float
+    date_bucket: float
+    source: float
+
+
+_PHASE0_SIZING = _SizingFractions(
+    inventory=MAKING_MAX_INVENTORY_PER_MARKET_FRACTION,
+    entity=MAX_ENTITY_CLUSTER_FRACTION,
+    theme=MAX_THEME_CLUSTER_FRACTION,
+    date_bucket=MAX_DATE_BUCKET_FRACTION,
+    source=MAX_RESOLUTION_SOURCE_FRACTION,
+)
+_SHAKEDOWN_SIZING = _SizingFractions(
+    inventory=MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION,
+    entity=MAKING_LIVE_MAX_ENTITY_CLUSTER_FRACTION,
+    theme=MAKING_LIVE_MAX_THEME_CLUSTER_FRACTION,
+    date_bucket=MAKING_LIVE_MAX_DATE_BUCKET_FRACTION,
+    source=MAKING_LIVE_MAX_RESOLUTION_SOURCE_FRACTION,
+)
+
+# task 20260818_2012's loosened MAKING_LIVE_MAX_*_FRACTION knobs (item 1a/1b)
+# exist only to clear the venue's min_size at a sub-$500 shakedown bankroll --
+# at the original $500 Phase 1 design point Phase 0's own fractions already
+# clear min_size (the task's dry run at $500 only skipped two markets, not
+# all of them), so a full-size run should be sized like Phase 0 rather than
+# like the $100 shakedown.
+_PHASE0_SIZING_THRESHOLD_USD = 500.0
+
+
+def _sizing_fractions(bankroll_cap_usd: float) -> _SizingFractions:
+    if bankroll_cap_usd >= _PHASE0_SIZING_THRESHOLD_USD:
+        return _PHASE0_SIZING
+    return _SHAKEDOWN_SIZING
+
+
 def _rank_affordable(quotable: list[QuotableMarket], per_market_budget_usd: float) -> list[QuotableMarket]:
     """task item 1c: at a small live bankroll, most of Phase 0's top-40 by
     raw reward rate are markets we can't afford to quote at all -- a
@@ -740,7 +784,8 @@ def run_live_tick(
         report.errors.extend(cancel_report.errors)
         return report
 
-    per_market_budget_usd = MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION * state.bankroll_cap_usd
+    sizing = _sizing_fractions(state.bankroll_cap_usd)
+    per_market_budget_usd = sizing.inventory * state.bankroll_cap_usd
     selected: list[QuotableMarket] = _rank_affordable(universe.quotable, per_market_budget_usd)[:max_markets_quoted]
     books = _fetch_books(clob, selected, report)
 
@@ -761,10 +806,10 @@ def run_live_tick(
     # commitments to the same cluster.
     cluster_tracker = ClusterExposureTracker(
         bankroll=state.bankroll_cap_usd,
-        entity_cap_fraction=MAKING_LIVE_MAX_ENTITY_CLUSTER_FRACTION,
-        theme_cap_fraction=MAKING_LIVE_MAX_THEME_CLUSTER_FRACTION,
-        date_bucket_cap_fraction=MAKING_LIVE_MAX_DATE_BUCKET_FRACTION,
-        source_cap_fraction=MAKING_LIVE_MAX_RESOLUTION_SOURCE_FRACTION,
+        entity_cap_fraction=sizing.entity,
+        theme_cap_fraction=sizing.theme,
+        date_bucket_cap_fraction=sizing.date_bucket,
+        source_cap_fraction=sizing.source,
     )
     for pos in state.open_positions:
         if pos.cluster_tags:
@@ -798,9 +843,7 @@ def run_live_tick(
         yes_pos = state.position_for_token(qm.market.id, qm.yes_token_id)
         no_pos = state.position_for_token(qm.market.id, qm.no_token_id) if qm.no_token_id else None
         net_shares = (yes_pos.net_shares if yes_pos else 0.0) - (no_pos.net_shares if no_pos else 0.0)
-        cap_shares = _inventory_cap_shares(
-            state.bankroll_cap_usd, midpoint, fraction=MAKING_LIVE_MAX_INVENTORY_PER_MARKET_FRACTION
-        )
+        cap_shares = _inventory_cap_shares(state.bankroll_cap_usd, midpoint, fraction=sizing.inventory)
         target_shares = qm.reward.min_size
         if target_shares > cap_shares:
             report.skip("reward_min_size_exceeds_inventory_cap")
