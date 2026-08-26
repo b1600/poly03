@@ -223,17 +223,25 @@ def test_partial_leg_failure_rolls_back_the_successful_leg(market_factory):
     assert any("rolled back" in e for e in report.errors)
 
 
-# --- sizing fractions (Phase 0 vs. $100-shakedown) --------------------------
+# --- sizing fractions (Phase 0 vs. shakedown) --------------------------
+#
+# Threshold is $10k, not $500: Phase 0's 0.02 fraction only clears real
+# min_size (observed up to 200 shares == $200 collateral, see execution.py's
+# _PHASE0_SIZING_THRESHOLD_USD comment) once the bankroll is in the multiple
+# thousands. At $500 it produced a $10/market budget that cleared nothing --
+# confirmed live by 3,275 consecutive would_place=0 ticks.
 
 
-def test_sizing_fractions_below_500_uses_shakedown_knobs():
+def test_sizing_fractions_below_10k_uses_shakedown_knobs():
     assert _sizing_fractions(100.0) == _SHAKEDOWN_SIZING
-    assert _sizing_fractions(499.99) == _SHAKEDOWN_SIZING
+    assert _sizing_fractions(500.0) == _SHAKEDOWN_SIZING
+    assert _sizing_fractions(1000.0) == _SHAKEDOWN_SIZING
+    assert _sizing_fractions(9_999.99) == _SHAKEDOWN_SIZING
 
 
-def test_sizing_fractions_at_or_above_500_uses_phase0_defaults():
-    assert _sizing_fractions(500.0) == _PHASE0_SIZING
-    assert _sizing_fractions(1000.0) == _PHASE0_SIZING
+def test_sizing_fractions_at_or_above_10k_uses_phase0_defaults():
+    assert _sizing_fractions(10_000.0) == _PHASE0_SIZING
+    assert _sizing_fractions(50_000.0) == _PHASE0_SIZING
 
 
 # --- affordability ranking (task item 1c) -----------------------------------

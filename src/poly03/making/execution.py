@@ -653,13 +653,25 @@ _SHAKEDOWN_SIZING = _SizingFractions(
     source=MAKING_LIVE_MAX_RESOLUTION_SOURCE_FRACTION,
 )
 
-# task 20260818_2012's loosened MAKING_LIVE_MAX_*_FRACTION knobs (item 1a/1b)
-# exist only to clear the venue's min_size at a sub-$500 shakedown bankroll --
-# at the original $500 Phase 1 design point Phase 0's own fractions already
-# clear min_size (the task's dry run at $500 only skipped two markets, not
-# all of them), so a full-size run should be sized like Phase 0 rather than
-# like the $100 shakedown.
-_PHASE0_SIZING_THRESHOLD_USD = 500.0
+# The $500 Phase 1 design point is NOT where Phase 0's own fraction (0.02)
+# clears real min_size -- it isn't close. `_rank_affordable` above compares
+# min_size in *dollars* (collateral == min_size regardless of price) against
+# `sizing.inventory * bankroll_cap_usd`. A snapshot of Phase 0's own quoted
+# universe (making_decisions.jsonl, 2026-08-08, n=40) has min_size at 20/50/
+# 100/200 shares (13/14/3/10 markets respectively) -- i.e. $20-$200 of
+# collateral per market. At 0.02 * $500 = $10, *zero* of those clear; the
+# $500 micro-live run confirmed this live, sitting at would_place=0 on every
+# one of 3,275 consecutive ticks over 42+ hours (paper_trade.log,
+# 2026-08-24/26) despite scanning 188-300 quotable markets each time.
+# Phase 0's fraction only becomes valid near the bankroll it was actually
+# calibrated for (PAPER_STARTING_BANKROLL, $100k by default: 0.02 * $100k =
+# $2,000/market, which clears every observed tier). $10k is a conservative
+# waypoint below that where it already clears the full observed distribution
+# (0.02 * $10k = $200) -- below this, every live phase (including $500)
+# should keep using the shakedown-style fractions, which were tuned against
+# the real min_size floor rather than against a hypothetical bankroll two
+# orders of magnitude larger than anything actually deployed live.
+_PHASE0_SIZING_THRESHOLD_USD = 10_000.0
 
 
 def _sizing_fractions(bankroll_cap_usd: float) -> _SizingFractions:

@@ -102,12 +102,17 @@ Micro-live places real resting limit orders on Polymarket, funded from your
 own wallet. Nothing here places an order until you pass `--live`; every
 command defaults to dry-run.
 
-Sizing depends on `--bankroll-cap`: below $500 the engine uses the loosened
-`MAKING_LIVE_MAX_*_FRACTION` knobs in `config.py`, tuned so a sub-$500
-bankroll can still clear the venue's minimum order size. At `--bankroll-cap
-500` or above it switches to Phase 0's own sizing fractions
-(`execution.py`'s `_sizing_fractions`), since those already clear min_size
-at that scale. There are accordingly two different things you can run:
+Sizing depends on `--bankroll-cap`: below $10,000 the engine uses the
+loosened `MAKING_LIVE_MAX_*_FRACTION` knobs in `config.py`, tuned so a live
+bankroll in the hundreds can still clear the venue's minimum order size
+(real `reward.min_size` runs $20-$200 of collateral per market — a $500
+run at Phase 0's own 0.02 fraction only budgets $10/market and clears
+none of it, confirmed live by a 42-hour, 3,275-tick stretch that never
+placed a single order). At `--bankroll-cap 10000` or above it switches to
+Phase 0's own sizing fractions (`execution.py`'s `_sizing_fractions`),
+since only at that scale does 0.02 of bankroll actually clear the observed
+min_size distribution. There are accordingly two different things you can
+run:
 
 #### $500 micro-live — strategy_v2.md §4 Phase 1
 
