@@ -673,6 +673,17 @@ def _flatten_position(
                 f"flatten: {pos.market_id} ({pos.token_id}) tracked net_shares={size_shares:g} exceeds "
                 f"on-chain balance={available:g} -- selling only what's actually held"
             )
+            # Without this, the drifted `net_shares` never shrinks, so every
+            # future tick re-runs this same check and logs the same error
+            # forever (that's what the 2026-08-31 screenshot incident was --
+            # ERRORS=1 on every single tick, indefinitely). `avg_price` and
+            # `realized_pnl_usd` are deliberately left alone (still no price
+            # history to attribute the missing shares to), but `net_shares`
+            # itself must be pulled down to on-chain truth so the position
+            # stops claiming phantom shares in equity/deployed-collateral and
+            # this branch only fires once per real drift, not every tick.
+            sign = 1.0 if pos.net_shares > 0 else -1.0
+            pos.net_shares = sign * available
         size_shares = min(size_shares, available)
         if size_shares < 1e-9:
             return

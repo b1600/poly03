@@ -577,6 +577,9 @@ def test_flatten_position_caps_sell_size_to_real_on_chain_balance():
     assert clob.posted[0]["size"] == 40.0
     assert state.open_orders[0].size_shares == 40.0
     assert any("exceeds on-chain balance" in e for e in report.errors)
+    # net_shares must be pulled down to on-chain truth, or every future tick
+    # re-detects the same 90-vs-40 drift and logs the same error forever.
+    assert pos.net_shares == 40.0
 
 
 def test_flatten_position_skips_when_no_real_balance_remains():
@@ -596,3 +599,9 @@ def test_flatten_position_skips_when_no_real_balance_remains():
 
     assert clob.posted == []
     assert state.open_orders == []
+    # net_shares must collapse to 0 along with it, or this position keeps
+    # re-triggering the same "nothing left to flatten" path -- and keeps
+    # logging the same error -- on every tick forever, and keeps inflating
+    # equity/deployed-collateral with shares that don't exist.
+    assert pos.net_shares == 0.0
+    assert state.open_positions == []
