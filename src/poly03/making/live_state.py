@@ -177,6 +177,19 @@ class LiveMakingState:
     last_reconciled_at: str | None = None
     n_ticks: int = 0
     one_sided_ticks: dict[str, int] = field(default_factory=dict)
+    paused_markets: dict[str, str] = field(default_factory=dict)
+    kill_switch_ack_scored_fills: int = 0
+
+    def resume_from_halt(self) -> None:
+        """Clear a halt after investigation. Not just `halted = False` --
+        also acks every currently-scored fill so the adverse-selection kill
+        switch (execution.py) needs fresh bad fills to re-trip rather than
+        immediately re-evaluating the same trailing window that caused this
+        halt (see that function's docstring for the 2026-08-31 deadlock this
+        fixes). Leaves halt_reasons in place as history rather than erasing
+        it -- only `halted` flips."""
+        self.halted = False
+        self.kill_switch_ack_scored_fills = len([f for f in self.fills if f.markout_5m_usd is not None])
 
     @property
     def open_positions(self) -> list[LiveInventory]:

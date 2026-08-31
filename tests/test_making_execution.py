@@ -14,6 +14,7 @@ from poly03.making.execution import (
     _sizing_fractions,
     check_adverse_selection_kill_switch,
     check_drawdown_kill_switch,
+    check_market_pauses,
     compute_markouts,
     run_live_tick,
 )
@@ -340,6 +341,111 @@ def test_adverse_selection_kill_switch_still_requires_consecutive_bad_fills():
         f.markout_5m_usd = -10.0  # badly adverse
     check_adverse_selection_kill_switch(state, report)
     assert not state.halted  # not enough scored fills yet
+
+
+def test_resume_from_halt_does_not_immediately_redeadlock_on_the_same_fills():
+    """2026-08-31 incident: clearing `halted` alone used to deadlock -- the
+    kill switch re-evaluates the same trailing window every tick, so if
+    nothing new has filled yet (guaranteed right after a resume), it saw the
+    exact same bad fills that caused the halt and re-tripped before the book
+    could earn a single new fill."""
+    from poly03.config import MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE
+
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+
+    for _ in range(MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE):
+        f = state.record_fill(
+            market_id="m", condition_id="c", token_id="111", question="q", side="buy", price=0.50, size_shares=20, order_id="o"
+        )
+        f.markout_5m_usd = -10.0
+    check_adverse_selection_kill_switch(state, report)
+    assert state.halted
+
+    state.resume_from_halt()
+    assert not state.halted
+
+    # A tick runs right after resume, before any new fill lands -- the same
+    # stale fills are still the "last N scored", but resume acked them.
+    check_adverse_selection_kill_switch(state, report)
+    assert not state.halted
+
+    # A fresh run of N bad fills after the ack point still trips it.
+    for _ in range(MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE):
+        f = state.record_fill(
+            market_id="m", condition_id="c", token_id="111", question="q", side="buy", price=0.50, size_shares=20, order_id="o2"
+        )
+        f.markout_5m_usd = -10.0
+    check_adverse_selection_kill_switch(state, report)
+    assert state.halted
+
+
+def test_market_pause_trips_on_that_markets_own_bad_streak_without_halting_book():
+    from poly03.config import MAKING_LIVE_MARKET_PAUSE_CONSECUTIVE
+
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+
+    for _ in range(MAKING_LIVE_MARKET_PAUSE_CONSECUTIVE):
+        f = state.record_fill(
+            market_id="bad-market", condition_id="c", token_id="111", question="q",
+            side="buy", price=0.50, size_shares=20, order_id="o",
+        )
+        f.markout_5m_usd = -10.0  # badly adverse
+
+    check_market_pauses(state, report)
+
+    assert "bad-market" in state.paused_markets
+    assert not state.halted  # book-wide halt is a separate, higher bar
+    assert any("market pause" in e for e in report.errors)
+
+
+def test_market_pause_does_not_trip_other_markets():
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+
+    from poly03.config import MAKING_LIVE_MARKET_PAUSE_CONSECUTIVE
+
+    for _ in range(MAKING_LIVE_MARKET_PAUSE_CONSECUTIVE):
+        f = state.record_fill(
+            market_id="bad-market", condition_id="c", token_id="111", question="q",
+            side="buy", price=0.50, size_shares=20, order_id="o",
+        )
+        f.markout_5m_usd = -10.0
+    good = state.record_fill(
+        market_id="good-market", condition_id="c2", token_id="222", question="q2",
+        side="buy", price=0.50, size_shares=20, order_id="o2",
+    )
+    good.markout_5m_usd = 5.0
+
+    check_market_pauses(state, report)
+
+    assert "bad-market" in state.paused_markets
+    assert "good-market" not in state.paused_markets
+
+
+def test_market_pause_clears_once_a_later_fill_scores_within_threshold():
+    from poly03.config import MAKING_LIVE_MARKET_PAUSE_CONSECUTIVE
+
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+
+    for _ in range(MAKING_LIVE_MARKET_PAUSE_CONSECUTIVE):
+        f = state.record_fill(
+            market_id="m", condition_id="c", token_id="111", question="q",
+            side="buy", price=0.50, size_shares=20, order_id="o",
+        )
+        f.markout_5m_usd = -10.0
+    check_market_pauses(state, report)
+    assert "m" in state.paused_markets
+
+    good = state.record_fill(
+        market_id="m", condition_id="c", token_id="111", question="q",
+        side="buy", price=0.50, size_shares=20, order_id="o2",
+    )
+    good.markout_5m_usd = 5.0
+    check_market_pauses(state, report)
+    assert "m" not in state.paused_markets
 
 
 # --- cancel-on-halt (task item 5) -------------------------------------------

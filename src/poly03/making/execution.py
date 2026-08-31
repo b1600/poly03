@@ -52,6 +52,8 @@ from poly03.config import (
     MAKING_LIVE_KILL_DRAWDOWN_FRACTION,
     MAKING_LIVE_KILL_MARKOUT_CENTS_PER_SHARE,
     MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE,
+    MAKING_LIVE_MARKET_PAUSE_CENTS_PER_SHARE,
+    MAKING_LIVE_MARKET_PAUSE_CONSECUTIVE,
     MAKING_LIVE_MARKOUT_WINDOW_SLACK_MINUTES,
     MAKING_LIVE_MAX_DATE_BUCKET_FRACTION,
     MAKING_LIVE_MAX_ENTITY_CLUSTER_FRACTION,
@@ -375,13 +377,26 @@ def check_adverse_selection_kill_switch(state: LiveMakingState, report: LiveTick
     history of good ones; a maker book that just started getting picked off
     needs to stop *now*, not once it's dragged the average down. Only trips
     on fills old enough to have a 5m markout; does nothing to already-placed
-    orders or open inventory -- flattening those is unwind_market's job."""
+    orders or open inventory -- flattening those is unwind_market's job.
+
+    2026-08-31 incident: resuming from a halt by just clearing `state.halted`
+    used to deadlock -- this function re-evaluates the same trailing window
+    of scored fills every tick, so if the last N scored fills were the exact
+    ones that tripped the halt (nothing new has filled yet, which is
+    guaranteed immediately after a resume since halted state places no
+    orders), it re-trips on the very first tick, before the book gets a
+    chance to earn a single new fill. `kill_switch_ack_scored_fills` is the
+    scored-fill count at the moment a halt was last acknowledged/cleared
+    (see cmd_make_live_resume) -- only fills scored *after* that point count
+    toward a fresh trip, so a resume needs N genuinely new bad fills to
+    re-halt, not a replay of the ones already investigated."""
     if state.halted:
         return
     scored = [f for f in state.fills if f.markout_5m_usd is not None]
-    if len(scored) < MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE:
+    new_since_ack = scored[state.kill_switch_ack_scored_fills :]
+    if len(new_since_ack) < MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE:
         return
-    recent = scored[-MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE:]
+    recent = new_since_ack[-MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE:]
     threshold_usd_per_share = -MAKING_LIVE_KILL_MARKOUT_CENTS_PER_SHARE / 100.0
     per_share = [f.markout_5m_usd / f.size_shares for f in recent if f.size_shares > 0]
     if len(per_share) == len(recent) and all(m <= threshold_usd_per_share for m in per_share):
@@ -392,6 +407,44 @@ def check_adverse_selection_kill_switch(state: LiveMakingState, report: LiveTick
         state.halted = True
         state.halt_reasons.append(reason)
         report.error(reason)
+
+
+def check_market_pauses(state: LiveMakingState, report: LiveTickReport) -> None:
+    """2026-08-31 incident: the whole-book kill switch above needs
+    MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE bad fills *anywhere* before it
+    trips -- which let the book re-buy the same one-sided market 4-5 times
+    before the book-wide streak finally lined up. This is the same check,
+    scoped to a single market_id with a smaller N: once a market's own last
+    MAKING_LIVE_MARKET_PAUSE_CONSECUTIVE scored fills all marked out worse
+    than the threshold, stop quoting *that market* (added to
+    `state.paused_markets`) without halting the rest of the book. Not
+    persistent once tripped like the global halt -- a market can earn its
+    way back off the pause list if a later fill scores better than
+    threshold, since a pause (unlike the book-wide halt) doesn't imply
+    something needs a human to look at it, just that this one market is
+    currently getting picked off."""
+    by_market: dict[str, list] = {}
+    for f in state.fills:
+        if f.markout_5m_usd is not None:
+            by_market.setdefault(f.market_id, []).append(f)
+    threshold_usd_per_share = -MAKING_LIVE_MARKET_PAUSE_CENTS_PER_SHARE / 100.0
+    for market_id, scored in by_market.items():
+        if len(scored) < MAKING_LIVE_MARKET_PAUSE_CONSECUTIVE:
+            state.paused_markets.pop(market_id, None)
+            continue
+        recent = scored[-MAKING_LIVE_MARKET_PAUSE_CONSECUTIVE:]
+        per_share = [f.markout_5m_usd / f.size_shares for f in recent if f.size_shares > 0]
+        bad_streak = len(per_share) == len(recent) and all(m <= threshold_usd_per_share for m in per_share)
+        if bad_streak:
+            if market_id not in state.paused_markets:
+                reason = (
+                    f"market pause: last {len(recent)} scored fills in {market_id} all marked out worse than "
+                    f"{MAKING_LIVE_MARKET_PAUSE_CENTS_PER_SHARE:.1f}c/share at 5m"
+                )
+                state.paused_markets[market_id] = reason
+                report.error(reason)
+        else:
+            state.paused_markets.pop(market_id, None)
 
 
 def check_drawdown_kill_switch(state: LiveMakingState, report: LiveTickReport) -> None:
@@ -774,6 +827,7 @@ def run_live_tick(
         compute_markouts(state, clob, report)
         _mark_to_market(state, clob, report)
         check_adverse_selection_kill_switch(state, report)
+        check_market_pauses(state, report)
         check_drawdown_kill_switch(state, report)
 
     # Unwind anything we're holding (orders or inventory) in a market that
@@ -783,6 +837,13 @@ def run_live_tick(
     for market_id in held_market_ids:
         if market_id not in quotable_by_market:
             _flatten_market(state, clob, market_id, report, dry_run=dry_run, decision_log_path=decision_log_path)
+
+    # A paused market (check_market_pauses above) stops new quotes but isn't
+    # a full unwind -- existing inventory can still ride out or later clear
+    # the pause -- so just cancel whatever's still resting there rather than
+    # closing the position out at the touch.
+    for market_id in list(state.paused_markets):
+        _cancel(state, clob, state.orders_for(market_id), report, dry_run=dry_run, decision_log_path=decision_log_path)
 
     if state.halted:
         report.skip("state_halted_no_new_quotes")
@@ -832,6 +893,9 @@ def run_live_tick(
     tag_cache: dict[str, list[str]] = {}
 
     for qm in selected:
+        if qm.market.id in state.paused_markets:
+            report.skip("market_paused")
+            continue
         book = books.get(qm.yes_token_id)
         if book is None:
             report.skip("no_order_book")

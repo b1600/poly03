@@ -277,6 +277,19 @@ MAKING_LIVE_BANKROLL_CAP_USD = _env_float("MAKING_LIVE_BANKROLL_CAP_USD", 500.0)
 MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE = int(_env_float("MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE", 5))
 MAKING_LIVE_KILL_MARKOUT_CENTS_PER_SHARE = _env_float("MAKING_LIVE_KILL_MARKOUT_CENTS_PER_SHARE", 2.0)
 
+# Per-market pause (2026-08-31 incident): the whole-book kill switch above
+# needs MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE bad fills *anywhere* before it
+# trips, which let the book re-buy the same two one-sided markets 4-5 times
+# each -- the min-size-suppresses-the-exit-side behavior (see
+# making/execution.py build_quote_pair callers) meant those markets could
+# only ever add, never hedge, so every one of those fills was a fresh bad
+# bet in a market the book had already lost money in. This trips much
+# sooner, on a single market, and only pauses quoting *that* market -- the
+# rest of the book keeps trading. Same "all of the last N, not an average"
+# reasoning as the whole-book switch.
+MAKING_LIVE_MARKET_PAUSE_CONSECUTIVE = int(_env_float("MAKING_LIVE_MARKET_PAUSE_CONSECUTIVE", 2))
+MAKING_LIVE_MARKET_PAUSE_CENTS_PER_SHARE = _env_float("MAKING_LIVE_MARKET_PAUSE_CENTS_PER_SHARE", 2.0)
+
 # Absolute equity-drawdown halt (task 20260818_2012 item 5), separate from
 # the markout-based switch above: trips from fill #1, not after
 # MAKING_LIVE_KILL_MARKOUT_CONSECUTIVE scored fills. Mirrors v1's

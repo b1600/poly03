@@ -573,6 +573,10 @@ def cmd_make_live_status(args: argparse.Namespace) -> None:
         _log("adverse selection: no fills old enough yet to score (needs 5m+)")
 
     _log(f"ticks run: {state.n_ticks}  last reconciled: {state.last_reconciled_at or 'never'}")
+    if state.paused_markets:
+        _log(f"paused markets ({len(state.paused_markets)}):")
+        for market_id, reason in state.paused_markets.items():
+            _log(f"  {market_id}: {reason}")
     if state.halted:
         _log(f"HALTED: {'; '.join(state.halt_reasons)}")
 
@@ -647,6 +651,19 @@ def cmd_make_live_record_reward(args: argparse.Namespace) -> None:
     state.record_reward_payout(args.amount, note=args.note or "")
     save_state(state, args.state_file)
     _log(f"logged reward payout of ${args.amount:,.2f}. realized_reward_usd_total is now ${state.realized_reward_usd_total:,.2f}")
+
+
+def cmd_make_live_resume(args: argparse.Namespace) -> None:
+    from poly03.making.live_state import load_state, save_state
+
+    state = load_state(args.state_file)
+    if not state.halted:
+        _log("Book M live state is not halted -- nothing to resume.")
+        return
+    _log(f"clearing halt: {'; '.join(state.halt_reasons)}")
+    state.resume_from_halt()
+    save_state(state, args.state_file)
+    _log("halt cleared. `make live run` (no --force needed) will resume quoting.")
 
 
 def cmd_make_live_reset(args: argparse.Namespace) -> None:
@@ -778,6 +795,8 @@ def cmd_make_live_run(args: argparse.Namespace) -> None:
                 )
                 save_state(state, args.state_file)
                 notifier.log(_report_line(report, state))
+                for e in report.errors[:5]:
+                    notifier.log(f"  error: {e}")
                 if state.halted:
                     # task item 6: page the moment a halt trips, not one full
                     # --interval late (the old code only re-checked
@@ -966,6 +985,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_lreward.add_argument("--amount", type=float, required=True)
     p_lreward.add_argument("--note", type=str, default="")
     p_lreward.set_defaults(func=cmd_make_live_record_reward)
+
+    p_lresume = live_sub.add_parser(
+        "resume", help="clear a halt after investigation (acks scored fills so the kill switch needs fresh bad fills to re-trip)"
+    )
+    p_lresume.add_argument("--state-file", default=MAKING_LIVE_STATE_FILE)
+    p_lresume.set_defaults(func=cmd_make_live_resume)
 
     p_lreset = live_sub.add_parser("reset", help="wipe Book M live state")
     p_lreset.add_argument("--state-file", default=MAKING_LIVE_STATE_FILE)
