@@ -1,9 +1,16 @@
-"""Thin wrapper around py-clob-client for the read paths strategy_v1.md
+"""Thin wrapper around py-clob-client-v2 for the read paths strategy_v1.md
 needs: live order books, best bid/ask, tick size, min order size -- plus,
 for strategy_v2.md §4 Phase 1, the write paths: post/cancel a limit order,
 list open orders. The write methods all require L2 creds and raise loudly
 if they're missing; nothing in this file signs or sends anything unless the
 caller explicitly asks it to place or cancel an order.
+
+Polymarket migrated the CLOB to a v2 order/exchange scheme; the old
+py-clob-client (last release 0.34.6, now archived) signs orders the v2
+server rejects with `invalid order version, please use the latest
+clob-client`. py-clob-client-v2 replaces it -- same host, near-identical
+API -- and self-heals future version bumps via its built-in
+retry-on-version-mismatch logic in `create_and_post_order`.
 """
 
 from __future__ import annotations
@@ -11,8 +18,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 import requests
-from py_clob_client.client import ClobClient as _RawClobClient
-from py_clob_client.clob_types import ApiCreds
+from py_clob_client_v2.client import ClobClient as _RawClobClient
+from py_clob_client_v2.clob_types import ApiCreds
+from py_clob_client_v2.utilities import parse_raw_orderbook_summary
 
 from poly03.config import Credentials, get_credentials, get_endpoints
 from poly03.data.models import OrderBook, PriceLevel
@@ -58,10 +66,10 @@ class ClobClient:
         call it on every startup."""
         if not self.creds.has_l1:
             raise RuntimeError("POLYMARKET_PRIVATE_KEY is not set; cannot derive API creds")
-        return self._client.create_or_derive_api_creds()
+        return self._client.create_or_derive_api_key()
 
     def get_order_book(self, token_id: str) -> OrderBook:
-        raw = self._client.get_order_book(token_id)
+        raw = parse_raw_orderbook_summary(self._client.get_order_book(token_id))
         return OrderBook(
             market=raw.market,
             asset_id=raw.asset_id,
@@ -75,9 +83,9 @@ class ClobClient:
         to per-token calls if the underlying client doesn't batch this."""
         ids = list(token_ids)
         try:
-            from py_clob_client.clob_types import BookParams
+            from py_clob_client_v2.clob_types import BookParams
 
-            raws = self._client.get_order_books([BookParams(token_id=t) for t in ids])
+            raws = [parse_raw_orderbook_summary(r) for r in self._client.get_order_books([BookParams(token_id=t) for t in ids])]
             return {
                 r.asset_id: OrderBook(
                     market=r.market,
@@ -130,20 +138,23 @@ class ClobClient:
         neg_risk: bool = False,
     ) -> dict:
         """Sign and rest one GTC limit order. `side` is
-        `py_clob_client.order_builder.constants.BUY` or `.SELL`. Requires L2
-        creds -- this is the only place in the codebase that spends real
-        capital."""
+        `py_clob_client_v2.order_builder.constants.BUY` or `.SELL`. Requires
+        L2 creds -- this is the only place in the codebase that spends real
+        capital. Uses `create_and_post_order` (not a separate create+post)
+        so a server-side order-version bump mid-run is retried once
+        automatically instead of failing the tick."""
         self._require_l2()
-        from py_clob_client.clob_types import OrderArgs, OrderType, PartialCreateOrderOptions
+        from py_clob_client_v2.clob_types import OrderArgs, OrderType, PartialCreateOrderOptions
 
         order_args = OrderArgs(token_id=token_id, price=price, size=size, side=side)
         options = PartialCreateOrderOptions(tick_size=_tick_size_literal(tick_size), neg_risk=neg_risk)
-        signed = self._client.create_order(order_args, options)
-        return self._client.post_order(signed, OrderType.GTC)
+        return self._client.create_and_post_order(order_args, options, order_type=OrderType.GTC)
 
     def cancel_order(self, order_id: str) -> dict:
         self._require_l2()
-        return self._client.cancel(order_id)
+        from py_clob_client_v2.clob_types import OrderPayload
+
+        return self._client.cancel_order(OrderPayload(orderID=order_id))
 
     def cancel_orders(self, order_ids: Iterable[str]) -> dict:
         ids = list(order_ids)
@@ -157,21 +168,14 @@ class ClobClient:
         return self._client.cancel_all()
 
     def get_open_orders(self, *, market: str | None = None, asset_id: str | None = None) -> list[dict]:
-        """All open orders, optionally scoped to one market/asset. Paginated
-        by opaque cursor, same "LTE=" end sentinel as iter_sampling_markets."""
+        """All open orders, optionally scoped to one market/asset. The v2
+        client's get_open_orders() already walks the opaque cursor
+        internally and returns the fully-collected list."""
         self._require_l2()
-        from py_clob_client.clob_types import OpenOrderParams
+        from py_clob_client_v2.clob_types import OpenOrderParams
 
         params = OpenOrderParams(market=market, asset_id=asset_id)
-        cursor = "MA=="
-        out: list[dict] = []
-        while True:
-            page = self._client.get_orders(params, cursor)
-            batch = page.get("data", []) if isinstance(page, dict) else (page or [])
-            out.extend(batch)
-            cursor = page.get("next_cursor") if isinstance(page, dict) else "LTE="
-            if not cursor or cursor == "LTE=":
-                return out
+        return self._client.get_open_orders(params)
 
     def get_order(self, order_id: str) -> dict | None:
         self._require_l2()
@@ -193,7 +197,7 @@ class ClobClient:
         it first (best-effort; the read below still works even if this
         fails) so preflight self-heals instead of reporting stale zeros."""
         self._require_l2()
-        from py_clob_client.clob_types import AssetType, BalanceAllowanceParams
+        from py_clob_client_v2.clob_types import AssetType, BalanceAllowanceParams
 
         params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL, signature_type=self.creds.signature_type)
         try:

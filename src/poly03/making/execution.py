@@ -75,7 +75,7 @@ from poly03.making.quoting import Quote, QuotePair, build_quote_pair, needs_requ
 from poly03.making.universe import QuotableMarket, UniverseReport, select_universe
 
 try:
-    from py_clob_client.order_builder.constants import BUY, SELL
+    from py_clob_client_v2.order_builder.constants import BUY, SELL
 except ImportError:  # pragma: no cover - py-clob-client always installs this
     BUY, SELL = "BUY", "SELL"
 
