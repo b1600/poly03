@@ -218,6 +218,27 @@ class ClobClient:
             allowance = float(resp.get("allowance") or 0) / 1_000_000.0
         return balance, allowance
 
+    def get_conditional_balance(self, token_id: str) -> float:
+        """On-chain share balance (not local bookkeeping) for one conditional
+        token, in whole shares -- the ERC1155 side of `get_usdc_balance_
+        allowance`'s COLLATERAL query, same 6-decimal raw units. Used before
+        a flatten sell (making/execution.py's `_flatten_position`) so an
+        order is never sized off local position accounting alone: a fill the
+        engine missed, a manual action, or any other source of drift between
+        `LiveInventory.net_shares` and reality would otherwise size a SELL
+        the exchange rejects with 'not enough balance / allowance' instead of
+        catching it here first."""
+        self._require_l2()
+        from py_clob_client_v2.clob_types import AssetType, BalanceAllowanceParams
+
+        params = BalanceAllowanceParams(asset_type=AssetType.CONDITIONAL, token_id=token_id, signature_type=self.creds.signature_type)
+        try:
+            self._client.update_balance_allowance(params)
+        except Exception:
+            pass
+        resp = self._client.get_balance_allowance(params)
+        return float(resp.get("balance") or 0) / 1_000_000.0
+
     def iter_sampling_markets(self, *, max_markets: int | None = None) -> Iterable[dict]:
         """Yield raw CLOB markets from /sampling-markets -- the authoritative
         list of *reward-eligible* markets, and the universe Book M quotes from

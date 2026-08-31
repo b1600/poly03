@@ -30,3 +30,6 @@ making_decisions.jsonl
 *.json
 *.jsonl
 *.log
+
+making_live_state.json.bak.20260831T205444
+making_live_state.json.bak.20260831T205925_precash

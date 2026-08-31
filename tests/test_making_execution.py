@@ -76,12 +76,19 @@ class FakeGamma:
 
 
 class FakeClob:
-    def __init__(self, sampling=(), books=None):
+    def __init__(self, sampling=(), books=None, conditional_balances=None):
         self._sampling = list(sampling)
         self._books = books or {}
         self.posted: list[dict] = []
         self.cancelled: list[list[str]] = []
         self._post_side_effect = None
+        # Defaults to "unlimited" (float("inf")) so existing tests that don't
+        # care about on-chain balance capping are unaffected; pass a dict
+        # {token_id: shares} to simulate a specific real balance.
+        self._conditional_balances = conditional_balances or {}
+
+    def get_conditional_balance(self, token_id):
+        return self._conditional_balances.get(token_id, float("inf"))
 
     def set_post_side_effect(self, fn):
         self._post_side_effect = fn
@@ -482,4 +489,110 @@ def test_halted_tick_cancels_tracked_resting_orders(market_factory):
     run_live_tick(state, universe=universe, gamma=gamma, clob=clob, max_markets_quoted=10, dry_run=False)
 
     assert clob.cancelled == [["order-1"]]
+    assert state.open_orders == []
+
+
+# --- flatten dedup (2026-08-31 incident: "not enough balance / allowance") -
+
+
+def test_flatten_position_tracks_order_and_skips_while_one_still_resting():
+    """A flatten order used to be fire-and-forget: nothing recorded it as
+    resting, so a second call (e.g. the next tick, before it fills or gets
+    cancelled) placed a *second* full-size sell on top of the first. The
+    exchange reserves shares against the first resting order, so the second
+    request exceeds free balance and the CLOB rejects it with 'not enough
+    balance / allowance'. Fixed by tracking the flatten order like any other
+    LiveOrder and skipping if one is already resting for this token/side."""
+    from poly03.making.execution import _flatten_position
+    from poly03.making.live_state import LiveInventory
+
+    clob = FakeClob(books={"111": _book(best_bid=0.48, best_ask=0.52)})
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    pos = LiveInventory(market_id="m1", condition_id="0xabc", token_id="111", question="q", net_shares=20.0, avg_price=0.49)
+    state.positions.append(pos)
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+
+    _flatten_position(state, clob, pos, report, dry_run=False, decision_log_path="/dev/null")
+    assert len(clob.posted) == 1
+    assert clob.posted[0]["side"] == "SELL"
+    assert len(state.open_orders) == 1
+    assert state.open_orders[0].side == "sell"
+
+    # Second call, nothing cancelled the resting flatten order in between --
+    # must not place a duplicate.
+    _flatten_position(state, clob, pos, report, dry_run=False, decision_log_path="/dev/null")
+    assert len(clob.posted) == 1
+    assert len(state.open_orders) == 1
+
+
+def test_flatten_market_cancels_stale_flatten_order_before_reflattening():
+    """_flatten_market already cancels every tracked order for the market
+    before flattening positions -- once the flatten order is tracked (this
+    fix), that existing cancel-then-place cycle naturally reissues it fresh
+    each tick instead of stacking a duplicate."""
+    from poly03.making.execution import _flatten_market
+    from poly03.making.live_state import LiveInventory
+
+    clob = FakeClob(books={"111": _book(best_bid=0.48, best_ask=0.52)})
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    pos = LiveInventory(market_id="m1", condition_id="0xabc", token_id="111", question="q", net_shares=20.0, avg_price=0.49)
+    state.positions.append(pos)
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+
+    _flatten_market(state, clob, "m1", report, dry_run=False, decision_log_path="/dev/null")
+    assert len(clob.posted) == 1
+    first_order_id = state.open_orders[0].order_id
+
+    # Simulate the next tick, still unfilled: cancel + reflatten, not stack.
+    _flatten_market(state, clob, "m1", report, dry_run=False, decision_log_path="/dev/null")
+    assert clob.cancelled == [[first_order_id]]
+    assert len(clob.posted) == 2
+    assert len(state.open_orders) == 1
+
+
+def test_flatten_position_caps_sell_size_to_real_on_chain_balance():
+    """The dedup fix alone wasn't enough: state resumed from before the fix
+    already had `net_shares` overstated vs. the real on-chain balance (a
+    flatten fill from an untracked order was never reconciled -- a market
+    that's left the quotable universe can't be adopted back, see
+    reconcile_fills/_adopt_untracked_order), so the very first flatten
+    attempt on a fresh process still asked to sell more than is actually
+    held and got the same 'not enough balance / allowance' rejection. The
+    real on-chain balance must cap what gets sold, regardless of what local
+    bookkeeping claims."""
+    from poly03.making.execution import _flatten_position
+    from poly03.making.live_state import LiveInventory
+
+    # Tracked position claims 90 shares; the chain only actually holds 40 --
+    # exactly the drift shape from the incident.
+    clob = FakeClob(books={"111": _book(best_bid=0.48, best_ask=0.52)}, conditional_balances={"111": 40.0})
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    pos = LiveInventory(market_id="m1", condition_id="0xabc", token_id="111", question="q", net_shares=90.0, avg_price=0.49)
+    state.positions.append(pos)
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+
+    _flatten_position(state, clob, pos, report, dry_run=False, decision_log_path="/dev/null")
+
+    assert len(clob.posted) == 1
+    assert clob.posted[0]["size"] == 40.0
+    assert state.open_orders[0].size_shares == 40.0
+    assert any("exceeds on-chain balance" in e for e in report.errors)
+
+
+def test_flatten_position_skips_when_no_real_balance_remains():
+    """If the chain reports ~0 (all of the tracked shares were already sold
+    by an untracked order before this fix existed), there's nothing left to
+    flatten -- must not attempt a zero/negative-size order."""
+    from poly03.making.execution import _flatten_position
+    from poly03.making.live_state import LiveInventory
+
+    clob = FakeClob(books={"111": _book(best_bid=0.48, best_ask=0.52)}, conditional_balances={"111": 0.0})
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    pos = LiveInventory(market_id="m1", condition_id="0xabc", token_id="111", question="q", net_shares=90.0, avg_price=0.49)
+    state.positions.append(pos)
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+
+    _flatten_position(state, clob, pos, report, dry_run=False, decision_log_path="/dev/null")
+
+    assert clob.posted == []
     assert state.open_orders == []

@@ -72,7 +72,7 @@ from poly03.config import (
 from poly03.data.clob import ClobClient
 from poly03.data.gamma import GammaClient
 from poly03.making.engine import _fetch_books, _inventory_cap_shares
-from poly03.making.live_state import LiveInventory, LiveMakingState, LiveOrder, log_event
+from poly03.making.live_state import FillSide, LiveInventory, LiveMakingState, LiveOrder, log_event
 from poly03.making.quoting import Quote, QuotePair, build_quote_pair, needs_requote, round_to_tick
 from poly03.making.universe import QuotableMarket, UniverseReport, select_universe
 
@@ -631,12 +631,58 @@ def _flatten_position(
         report.error(f"flatten: no {'bid' if side == 'ask' else 'ask'} to flatten against for {pos.market_id} ({pos.token_id})")
         return
 
+    order_side: FillSide = "sell" if side == "ask" else "buy"
+
+    # 2026-08-31 incident: a flatten order used to be fire-and-forget -- never
+    # added to state.open_orders -- so on the next tick nothing knew it was
+    # still resting. _flatten_market's own _cancel(orders_for(market_id))
+    # call couldn't see it either, so every subsequent tick placed *another*
+    # full-size flatten order on top of the still-open one. The exchange
+    # reserves shares against a resting order, so the second (and third, ...)
+    # attempt asked for more than the now-locked free balance and failed with
+    # "not enough balance / allowance". Tracking it here like a normal
+    # LiveOrder makes _flatten_market's existing cancel-then-reflatten cycle
+    # (and reconcile_fills' generic buy/sell handling) apply to it too: next
+    # tick either cancels the still-resting order before retrying, or
+    # reconciles its fill and correctly updates `pos.net_shares`.
+    if any(o.token_id == pos.token_id and o.side == order_side for o in state.open_orders):
+        return
+
+    size_shares = abs(pos.net_shares)
+    if order_side == "sell" and not dry_run:
+        # 2026-08-31 incident (continued): the balance error kept recurring
+        # even with the above dedup fix, because `pos.net_shares` had
+        # already drifted above the real on-chain share balance -- state
+        # accumulated from ticks before this fix existed, when a flatten
+        # order's fill was never reconciled (untracked orders aren't adopted
+        # for a market that's left the quotable universe -- see
+        # reconcile_fills/_adopt_untracked_order). Sizing a SELL off local
+        # bookkeeping alone can therefore still ask for more than the
+        # exchange will allow. Check the real balance first and never sell
+        # more of it than actually exists; `pos.net_shares` itself is left
+        # alone (no price history to attribute the missing shares to) so
+        # this only prevents the failed call, it doesn't silently rewrite
+        # realized P&L.
+        try:
+            available = clob.get_conditional_balance(pos.token_id)
+        except Exception as exc:
+            report.error(f"flatten: could not fetch on-chain balance for {pos.market_id} ({pos.token_id}): {exc}")
+            return
+        if available < size_shares - 1e-6:
+            report.error(
+                f"flatten: {pos.market_id} ({pos.token_id}) tracked net_shares={size_shares:g} exceeds "
+                f"on-chain balance={available:g} -- selling only what's actually held"
+            )
+        size_shares = min(size_shares, available)
+        if size_shares < 1e-9:
+            return
+
     intent = {
         "market_id": pos.market_id,
         "token_id": pos.token_id,
         "side": side,
         "price": level.price,
-        "size_shares": abs(pos.net_shares),
+        "size_shares": size_shares,
         "reason": "flatten_before_resolution",
     }
     if dry_run:
@@ -647,7 +693,7 @@ def _flatten_position(
         resp = clob.post_limit_order(
             token_id=pos.token_id,
             price=level.price,
-            size=abs(pos.net_shares),
+            size=size_shares,
             side=_SIDE_TO_ORDER_SIDE[side],
             tick_size=pos.tick_size,
             neg_risk=pos.neg_risk,
@@ -656,7 +702,29 @@ def _flatten_position(
         report.error(f"flatten order failed for {pos.market_id} ({pos.token_id}): {exc}")
         return
 
-    order_id = _extract_order_id(resp) or "unknown"
+    order_id = _extract_order_id(resp)
+    if not order_id:
+        report.error(f"flatten for {pos.market_id} ({pos.token_id}) returned no order id: {resp}")
+        return
+
+    bb, ba = book.best_bid, book.best_ask
+    book_mid = (bb.price + ba.price) / 2.0 if bb and ba else level.price
+    state.add_order(
+        LiveOrder(
+            order_id=order_id,
+            market_id=pos.market_id,
+            condition_id=pos.condition_id,
+            token_id=pos.token_id,
+            question=pos.question,
+            side=order_side,
+            price=level.price,
+            size_shares=size_shares,
+            quoted_midpoint=book_mid,
+            tick_size=pos.tick_size,
+            neg_risk=pos.neg_risk,
+        )
+    )
+
     report.flattened.append({**intent, "order_id": order_id})
     log_event({"kind": "flatten", "order_id": order_id, **intent}, path=decision_log_path)
 
@@ -862,14 +930,21 @@ def run_live_tick(
     selected: list[QuotableMarket] = _rank_affordable(universe.quotable, per_market_budget_usd)[:max_markets_quoted]
     books = _fetch_books(clob, selected, report)
 
-    # Every resting Book M order is a literal BUY (see _SIDE_TO_ORDER_SIDE's
+    # Every resting quote order is a literal BUY (see _SIDE_TO_ORDER_SIDE's
     # docstring) -- for a bid that's `price * size` of YES, for an ask that's
     # `price * size` of NO, where `order.price` is already the NO price
     # (1 - ask_price, converted at placement time in _place_side). Either way
     # the collateral is just price * size; no side-branch needed.
+    #
+    # A tracked flatten order (see _flatten_position) can be "sell" though --
+    # its notional isn't newly-deployed capital, the position it's closing is
+    # already counted in deployed_collateral_usd above, so counting the sell
+    # order's notional too would double it and could spuriously trip
+    # live_budget_exhausted.
     deployed = state.deployed_collateral_usd
     for order in state.open_orders:
-        deployed += order.price * order.size_shares
+        if order.side == "buy":
+            deployed += order.price * order.size_shares
     budget = state.bankroll_cap_usd
 
     # §4.3 cluster caps, applied to real exposure. Rebuilt fresh each tick
