@@ -67,9 +67,21 @@ class UniverseReport:
     scanned: int = 0
     reward_eligible: int = 0
     rejections: dict[str, int] = field(default_factory=dict)
+    # market_id -> reason, for the rejections that oblige us to close out
+    # inventory rather than merely stop quoting. Only the
+    # flatten-before-resolution window qualifies: a deadline is the one
+    # reason worth paying the spread to exit for. Volume dipping under the
+    # floor, the spread tightening to a tick, a reward-rate reshuffle -- all
+    # make a market not worth *quoting*, none make the inventory unsafe to
+    # *hold*. See execution.run_live_tick and MAKING_UNWIND_ON_UNIVERSE_DROP.
+    unwind_required: dict[str, str] = field(default_factory=dict)
 
     def reject(self, reason: str) -> None:
         self.rejections[reason] = self.rejections.get(reason, 0) + 1
+
+    def require_unwind(self, market_id: str, reason: str) -> None:
+        self.reject(reason)
+        self.unwind_required[market_id] = reason
 
 
 def load_reward_configs(clob: ClobClient, *, max_markets: int | None = None) -> dict[str, tuple[dict, RewardConfig]]:
@@ -157,7 +169,9 @@ def select_universe(
 
         days = market.days_to_resolution
         if days is None or days * 24.0 <= MAKING_FLATTEN_HOURS_BEFORE_RESOLUTION:
-            report.reject("resolving_within_flatten_window")
+            # The one rejection that means "close out what you hold", not
+            # just "stop quoting" -- §3.2's flatten-before-resolution rule.
+            report.require_unwind(market.id, "resolving_within_flatten_window")
             continue
 
         exclusion = apply_resolution_risk_filters(market)

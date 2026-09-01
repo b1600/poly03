@@ -114,6 +114,9 @@ class LiveOrder:
     cluster_tags: dict[str, Any] = field(default_factory=dict)
     tick_size: float = 0.01
     neg_risk: bool = False
+    # Market's resolution deadline at placement time, carried onto the
+    # position when this order fills -- see LiveInventory.end_date_iso.
+    end_date_iso: str | None = None
 
     @property
     def cluster(self) -> ClusterTags:
@@ -140,6 +143,20 @@ class LiveInventory:
     tick_size: float = 0.01
     neg_risk: bool = False
     mark_price: float | None = None
+    # ISO8601 resolution deadline for the market, stamped from Gamma when the
+    # position is opened. Carried on the position itself so the flatten window
+    # can be enforced even for a market that has dropped out of the scan
+    # entirely -- the universe scan stops at the 24h-volume floor, so a market
+    # that goes quiet is never re-examined and would otherwise be held straight
+    # into resolution. None means unknown (a position from a state file written
+    # before this field existed), which falls back to the universe signal.
+    end_date_iso: str | None = None
+    # When the current flatten attempt began. `_flatten_position` works the
+    # exit passively (resting at the midpoint, re-priced each tick) for
+    # MAKING_FLATTEN_PASSIVE_MINUTES before crossing the spread, and the
+    # per-tick cancel/replace cycle means order age can't measure that -- the
+    # order is new every tick. Cleared whenever the position goes flat.
+    flatten_started_at: str | None = None
 
     @property
     def collateral_usd(self) -> float:
@@ -305,15 +322,24 @@ class LiveMakingState:
         question: str,
         tick_size: float = 0.01,
         neg_risk: bool = False,
+        end_date_iso: str | None = None,
     ) -> LiveInventory:
         """Keyed on `(market_id, token_id)`, not `market_id` alone -- Book M
         can hold a YES-token position and a NO-token position in the same
         market at once (see execution.py's NO-leg routing), and they must
         not share one `net_shares`/`avg_price`. `tick_size`/`neg_risk` are
         only stamped on creation; an existing position's values (from
-        whichever fill created it) are authoritative."""
+        whichever fill created it) are authoritative.
+
+        `end_date_iso` is the exception: it backfills onto an existing
+        position that doesn't have one yet. It only ever gets more accurate
+        (a position opened before the field existed, or from a fill whose
+        market couldn't be resolved, starts as None), and the flatten
+        deadline is safety-critical enough to be worth filling in late."""
         existing = self.position_for_token(market_id, token_id)
         if existing is not None:
+            if existing.end_date_iso is None and end_date_iso:
+                existing.end_date_iso = end_date_iso
             return existing
         pos = LiveInventory(
             market_id=market_id,
@@ -322,6 +348,7 @@ class LiveMakingState:
             question=question,
             tick_size=tick_size,
             neg_risk=neg_risk,
+            end_date_iso=end_date_iso,
         )
         self.positions.append(pos)
         return pos
@@ -342,6 +369,7 @@ class LiveMakingState:
         tick_size: float = 0.01,
         neg_risk: bool = False,
         source: str = "orders",
+        end_date_iso: str | None = None,
     ) -> LiveFill:
         """Apply one real fill (buy adds to inventory, sell reduces it) and
         update cash/avg price/realized P&L accordingly. This is the single
@@ -357,6 +385,7 @@ class LiveMakingState:
             question=question,
             tick_size=tick_size,
             neg_risk=neg_risk,
+            end_date_iso=end_date_iso,
         )
         new_net = pos.net_shares + signed_shares
 
@@ -375,6 +404,11 @@ class LiveMakingState:
                 pos.avg_price = price  # flipped past flat, new basis on the remainder
 
         pos.net_shares = new_net
+        if new_net == 0.0:
+            # Flat again: the next flatten (if any) is a fresh attempt and
+            # gets its own passive window, rather than inheriting a timer
+            # from an exit that already completed.
+            pos.flatten_started_at = None
         self.cash_usd += (-collateral_usd if side == "buy" else collateral_usd) - fee_usd
         self.realized_fee_usd_total += fee_usd
 

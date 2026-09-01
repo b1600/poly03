@@ -29,10 +29,18 @@ Safety model:
   against us -- see MAKING_LIVE_KILL_MARKOUT_* in config.py. This book has
   no `q`, so v1's Tier-1-miss/drawdown switches don't apply; this is the
   Book M equivalent.
-- A market that drops out of the Phase 0 universe (including via the
-  flatten-before-resolution window in `select_universe`) is unwound: any
-  resting orders are cancelled and any inventory is closed out at the
-  touch, never left to ride into resolution.
+- A market that drops out of the Phase 0 universe has its resting orders
+  cancelled. Its *inventory* is only closed out when a deadline demands it
+  -- the flatten-before-resolution window, seen either in the scan
+  (`UniverseReport.unwind_required`) or on the position's own stamped
+  `end_date_iso`. Nothing rides into resolution, but a market that merely
+  went quiet or tightened its spread is held rather than sold at the
+  touch; see MAKING_UNWIND_ON_UNIVERSE_DROP for why that distinction was
+  worth ~$38 over 33 hours.
+- A flatten rests at the midpoint and is re-priced each tick for
+  MAKING_FLATTEN_PASSIVE_MINUTES before it crosses the spread. Being the
+  maker on the way in and the taker on the way out is how a 2-4c gross
+  spread turned into a -4.99c/share average exit.
 - Every real network call is caught per-item so one failed order/cancel
   doesn't take down the rest of the tick -- same pattern as
   `making/engine.py`'s order-book batch fetch.
@@ -48,6 +56,8 @@ from poly03.classifier.llm_veto import LLMClassifierVeto, NoOpVeto
 from poly03.cluster.tagging import ClusterExposureTracker, ensure_event_tags, tag_market
 from poly03.config import (
     GAMMA_MAX_SCAN_MARKETS,
+    MAKING_FLATTEN_HOURS_BEFORE_RESOLUTION,
+    MAKING_FLATTEN_PASSIVE_MINUTES,
     MAKING_LIVE_DECISION_LOG_FILE,
     MAKING_LIVE_KILL_DRAWDOWN_FRACTION,
     MAKING_LIVE_KILL_MARKOUT_CENTS_PER_SHARE,
@@ -63,7 +73,9 @@ from poly03.config import (
     MAKING_LIVE_MIN_NOTIONAL_USD,
     MAKING_MAX_INVENTORY_PER_MARKET_FRACTION,
     MAKING_MAX_MARKETS_QUOTED,
+    MAKING_QUOTE_SIZE_MULTIPLE,
     MAKING_REQUOTE_MID_MOVE_CENTS,
+    MAKING_UNWIND_ON_UNIVERSE_DROP,
     MAX_DATE_BUCKET_FRACTION,
     MAX_ENTITY_CLUSTER_FRACTION,
     MAX_RESOLUTION_SOURCE_FRACTION,
@@ -358,6 +370,7 @@ def _apply_order_update(
             tick_size=order.tick_size,
             neg_risk=order.neg_risk,
             source="orders",
+            end_date_iso=order.end_date_iso,
         )
         report.new_fills.append(fill.__dict__)
         log_event({"kind": "fill", **fill.__dict__}, path=decision_log_path)
@@ -466,6 +479,13 @@ def _our_trade_legs(trade: dict, account_address: str) -> list[_TradeLeg]:
     return legs
 
 
+def _end_date_iso(qm: QuotableMarket | None) -> str | None:
+    """A quotable market's resolution deadline as ISO8601, or None."""
+    if qm is None or qm.market.end_date is None:
+        return None
+    return qm.market.end_date.isoformat()
+
+
 def _fill_context(
     state: LiveMakingState, leg: _TradeLeg, token_to_market: dict[str, QuotableMarket]
 ) -> dict:
@@ -487,6 +507,10 @@ def _fill_context(
                 question=pos.question,
                 tick_size=pos.tick_size,
                 neg_risk=pos.neg_risk,
+                # Still offered from the universe/orders when the position
+                # doesn't have one -- position_for backfills a missing
+                # deadline rather than treating the existing row as final.
+                end_date_iso=pos.end_date_iso or _end_date_iso(token_to_market.get(leg.token_id)),
             )
     qm = token_to_market.get(leg.token_id)
     if qm is not None:
@@ -496,6 +520,7 @@ def _fill_context(
             question=qm.market.question,
             tick_size=qm.tick_size,
             neg_risk=qm.market.neg_risk,
+            end_date_iso=_end_date_iso(qm),
         )
     for order in state.open_orders:
         if order.token_id == leg.token_id:
@@ -505,6 +530,7 @@ def _fill_context(
                 question=order.question,
                 tick_size=order.tick_size,
                 neg_risk=order.neg_risk,
+                end_date_iso=order.end_date_iso,
             )
     return dict(
         market_id=leg.condition_id,
@@ -512,6 +538,7 @@ def _fill_context(
         question=f"(unresolved market for token {leg.token_id})",
         tick_size=0.01,
         neg_risk=False,
+        end_date_iso=None,
     )
 
 
@@ -1018,11 +1045,14 @@ def _place_side(
             cluster_tags=cluster_tags,
             tick_size=qm.tick_size,
             neg_risk=qm.market.neg_risk,
+            end_date_iso=_end_date_iso(qm),
         )
     )
     # Stamp tags on the position too (created empty if this is the first
     # time we've ever quoted this token) so cluster exposure is still
     # attributable once the order becomes a fill and the LiveOrder is gone.
+    # Same for the resolution deadline, which the flatten window needs even
+    # after the market has dropped out of the scan.
     pos = state.position_for(
         qm.market.id,
         condition_id=qm.market.condition_id,
@@ -1030,6 +1060,7 @@ def _place_side(
         question=qm.market.question,
         tick_size=qm.tick_size,
         neg_risk=qm.market.neg_risk,
+        end_date_iso=_end_date_iso(qm),
     )
     if not pos.cluster_tags:
         pos.cluster_tags = cluster_tags
@@ -1037,6 +1068,71 @@ def _place_side(
     report.placed.append({**intent, "order_id": order_id})
     log_event({"kind": "place", "order_id": order_id, **intent}, path=decision_log_path)
     return order_id
+
+
+def _markets_past_flatten_deadline(state: LiveMakingState) -> set[str]:
+    """Markets we hold inventory in whose own stamped resolution date is
+    inside the flatten window.
+
+    The universe scan can't be the only signal for this. `select_universe`
+    iterates Gamma in descending 24h-volume order and *breaks* at the volume
+    floor, so a market that goes quiet is never scanned again -- it would
+    never be reported as resolving, and under the narrowed unwind rule we'd
+    hold it straight into resolution. `LiveInventory.end_date_iso` is stamped
+    when the position opens, so the deadline survives the market falling out
+    of view. Positions predating the field have `None` and fall back to the
+    universe signal alone."""
+    out: set[str] = set()
+    now = datetime.now(timezone.utc)
+    horizon = timedelta(hours=MAKING_FLATTEN_HOURS_BEFORE_RESOLUTION)
+    for pos in state.open_positions:
+        if not pos.end_date_iso:
+            continue
+        try:
+            end = datetime.fromisoformat(pos.end_date_iso)
+        except (TypeError, ValueError):
+            continue
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        if end - now <= horizon:
+            out.add(pos.market_id)
+    return out
+
+
+def _flatten_deadline_passed(started_at_iso: str) -> bool:
+    """Has this flatten attempt been worked passively for long enough that it
+    should now cross the spread?"""
+    try:
+        started = datetime.fromisoformat(started_at_iso)
+    except (TypeError, ValueError):
+        # Unparseable timestamp: cross rather than risk working an exit
+        # passively forever on a stamp we can't age.
+        return True
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - started
+    return age >= timedelta(minutes=MAKING_FLATTEN_PASSIVE_MINUTES)
+
+
+def _passive_flatten_price(book, side: str, tick_size: float, touch_price: float) -> float:
+    """Where to rest a flatten order so it earns the spread instead of paying
+    it.
+
+    Target is the midpoint, rounded in our favour, then clamped strictly
+    inside the book so the order rests as a maker rather than matching on
+    arrival: a sell must sit above the best bid, a buy below the best ask.
+    Falls back to the touch on a one-sided book, where there is no midpoint
+    to rest at."""
+    bb, ba = book.best_bid, book.best_ask
+    if bb is None or ba is None or ba.price <= bb.price:
+        return touch_price
+    midpoint = (bb.price + ba.price) / 2.0
+    if side == "ask":  # selling: round up, stay above the bid, at or under the ask
+        price = round_to_tick(midpoint, tick_size, mode="up")
+        return min(ba.price, max(price, round_to_tick(bb.price + tick_size, tick_size, mode="up")))
+    # buying: round down, stay below the ask, at or over the bid
+    price = round_to_tick(midpoint, tick_size, mode="down")
+    return max(bb.price, min(price, round_to_tick(ba.price - tick_size, tick_size, mode="down")))
 
 
 def _flatten_position(
@@ -1048,10 +1144,19 @@ def _flatten_position(
     dry_run: bool,
     decision_log_path: str,
 ) -> None:
-    """Close out one token's inventory at the touch. Only ever a SELL of
-    shares we actually hold (`net_shares` can't go negative under Book M's
+    """Close out one token's inventory. Only ever a SELL of shares we
+    actually hold (`net_shares` can't go negative under Book M's
     no-naked-shorting placement -- see _place_side), but the buy-if-short
-    branch is kept for defensiveness against accounting edge cases."""
+    branch is kept for defensiveness against accounting edge cases.
+
+    Priced at the midpoint, not the touch, for the first
+    MAKING_FLATTEN_PASSIVE_MINUTES of the attempt. This used to cross the
+    spread on the very first tick, which is how a book whose entire gross
+    revenue is a 2-4c spread came to lose an average of 4.99c/share on 23 of
+    29 round trips (2026-08-31/09-01). We are the maker on the way in;
+    there is no reason to be the taker on the way out until a deadline
+    actually forces it. Past the passive window the order does cross --
+    getting out before resolution beats getting out at a good price."""
     if abs(pos.net_shares) < 1e-9:
         return
 
@@ -1083,6 +1188,16 @@ def _flatten_position(
         return
 
     order_side: FillSide = "sell" if side == "ask" else "buy"
+
+    # Dry-run must not stamp the timer -- the safety model says a dry tick
+    # mutates no state, and starting the passive clock here would mean a
+    # sequence of dry ticks silently "used up" the window before any real
+    # order was ever placed.
+    started_at = pos.flatten_started_at or _now_iso()
+    if not dry_run:
+        pos.flatten_started_at = started_at
+    crossing = _flatten_deadline_passed(started_at)
+    price = level.price if crossing else _passive_flatten_price(book, side, pos.tick_size, level.price)
 
     # 2026-08-31 incident: a flatten order used to be fire-and-forget -- never
     # added to state.open_orders -- so on the next tick nothing knew it was
@@ -1143,9 +1258,9 @@ def _flatten_position(
         "market_id": pos.market_id,
         "token_id": pos.token_id,
         "side": side,
-        "price": level.price,
+        "price": price,
         "size_shares": size_shares,
-        "reason": "flatten_before_resolution",
+        "reason": "flatten_crossing_after_timeout" if crossing else "flatten_passive_at_mid",
     }
     if dry_run:
         report.would_place.append(intent)
@@ -1154,7 +1269,7 @@ def _flatten_position(
     try:
         resp = clob.post_limit_order(
             token_id=pos.token_id,
-            price=level.price,
+            price=price,
             size=size_shares,
             side=_SIDE_TO_ORDER_SIDE[side],
             tick_size=pos.tick_size,
@@ -1170,7 +1285,7 @@ def _flatten_position(
         return
 
     bb, ba = book.best_bid, book.best_ask
-    book_mid = (bb.price + ba.price) / 2.0 if bb and ba else level.price
+    book_mid = (bb.price + ba.price) / 2.0 if bb and ba else price
     state.add_order(
         LiveOrder(
             order_id=order_id,
@@ -1179,7 +1294,7 @@ def _flatten_position(
             token_id=pos.token_id,
             question=pos.question,
             side=order_side,
-            price=level.price,
+            price=price,
             size_shares=size_shares,
             quoted_midpoint=book_mid,
             tick_size=pos.tick_size,
@@ -1266,10 +1381,13 @@ def _sizing_fractions(bankroll_cap_usd: float) -> _SizingFractions:
 def _rank_affordable(quotable: list[QuotableMarket], per_market_budget_usd: float) -> list[QuotableMarket]:
     """task item 1c: at a small live bankroll, most of Phase 0's top-40 by
     raw reward rate are markets we can't afford to quote at all -- a
-    symmetric two-sided min-size quote costs exactly `reward.min_size`
-    dollars of collateral regardless of price (bid + ask collateral sums to
-    `n*price + n*(1-price) = n`), so affordability is a pure min_size vs.
-    budget check, no book fetch required.
+    symmetric two-sided quote of `n` shares costs exactly `n` dollars of
+    collateral regardless of price (bid + ask collateral sums to
+    `n*price + n*(1-price) = n`), so affordability is a pure size vs.
+    budget check, no book fetch required. `n` is
+    `min_size * MAKING_QUOTE_SIZE_MULTIPLE`, matching what the quoting loop
+    actually asks for -- ranking against the bare `min_size` would promote
+    markets that then fail the inventory cap and get skipped.
 
     Ranks the affordable remainder by daily reward rate per dollar of
     required collateral -- a pool-density proxy, not a competition-adjusted
@@ -1277,7 +1395,9 @@ def _rank_affordable(quotable: list[QuotableMarket], per_market_budget_usd: floa
     needs a book fetch per candidate; out of scope for a per-tick selection
     pass over the whole scanned universe). Consistent with how Phase 0's own
     `reward_density` sort already ignores competition."""
-    affordable = [qm for qm in quotable if qm.reward.min_size <= per_market_budget_usd]
+    affordable = [
+        qm for qm in quotable if qm.reward.min_size * MAKING_QUOTE_SIZE_MULTIPLE <= per_market_budget_usd
+    ]
     affordable.sort(key=lambda qm: qm.reward.daily_rate_usd / qm.reward.min_size, reverse=True)
     return affordable
 
@@ -1376,13 +1496,47 @@ def run_live_tick(
     # should be able to prevent it.
     cancel_stale_quotes(state, clob, report, dry_run=dry_run, decision_log_path=decision_log_path)
 
-    # Unwind anything we're holding (orders or inventory) in a market that
-    # has fallen out of the quotable universe -- most commonly because it
-    # crossed into the flatten window since the last tick.
+    # A market leaving the quotable universe is a reason to stop quoting it.
+    # It is not, by itself, a reason to pay the spread to get out.
+    #
+    # This used to flatten unconditionally, which turned every wobble across
+    # a universe threshold -- 24h volume around $1k, spread tightening to one
+    # tick, a reward-rate reshuffle -- into a forced taker sale of the whole
+    # position. It shows up in the trade history as synchronised liquidation
+    # bursts on the universe-refresh boundary (2026-09-01: 05:20 across two
+    # markets, 08:23 across three, 08:53 across three; median hold 58
+    # minutes) and cost -4.99c/share against a 2-4c gross spread.
+    #
+    # Now only a deadline unwinds: the market is inside the
+    # flatten-before-resolution window per the scan, or the position's own
+    # stamped end date says it is (which covers markets that went quiet and
+    # dropped out of the scan entirely -- select_universe stops at the
+    # 24h-volume floor and never re-examines them). Everything else cancels
+    # the resting quotes and holds. MAKING_UNWIND_ON_UNIVERSE_DROP restores
+    # the old behaviour.
     held_market_ids = {o.market_id for o in state.open_orders} | {p.market_id for p in state.open_positions}
+    deadline_market_ids = _markets_past_flatten_deadline(state)
     for market_id in held_market_ids:
-        if market_id not in quotable_by_market:
+        if market_id in quotable_by_market:
+            continue
+        must_unwind = (
+            market_id in universe.unwind_required
+            or market_id in deadline_market_ids
+            or MAKING_UNWIND_ON_UNIVERSE_DROP
+        )
+        if must_unwind:
             _flatten_market(state, clob, market_id, report, dry_run=dry_run, decision_log_path=decision_log_path)
+        else:
+            # Stop adding, keep the inventory. Cancelling only sheds risk.
+            _cancel(
+                state,
+                clob,
+                state.orders_for(market_id),
+                report,
+                dry_run=dry_run,
+                decision_log_path=decision_log_path,
+            )
+            report.skip("left_universe_holding_inventory")
 
     # A paused market (check_market_pauses above) stops new quotes but isn't
     # a full unwind -- existing inventory can still ride out or later clear
@@ -1511,7 +1665,12 @@ def run_live_tick(
         no_pos = state.position_for_token(qm.market.id, qm.no_token_id) if qm.no_token_id else None
         net_shares = (yes_pos.net_shares if yes_pos else 0.0) - (no_pos.net_shares if no_pos else 0.0)
         cap_shares = _inventory_cap_shares(state.bankroll_cap_usd, midpoint, fraction=sizing.inventory)
-        target_shares = qm.reward.min_size
+        # Quoted above min_size on purpose, so inventory skew tapers the
+        # adding side instead of amputating it at the first fill -- see
+        # MAKING_QUOTE_SIZE_MULTIPLE for why that distinction is the
+        # difference between earning rewards while holding inventory and
+        # earning nothing.
+        target_shares = qm.reward.min_size * MAKING_QUOTE_SIZE_MULTIPLE
         if target_shares > cap_shares:
             report.skip("reward_min_size_exceeds_inventory_cap")
             continue
@@ -1527,6 +1686,8 @@ def run_live_tick(
             target_size_shares=target_shares,
             net_inventory_shares=net_shares,
             inventory_cap_shares=cap_shares,
+            yes_avg_price=yes_pos.avg_price if yes_pos and yes_pos.net_shares else None,
+            no_avg_price=no_pos.avg_price if no_pos and no_pos.net_shares else None,
         )
         if pair.is_empty:
             report.skip("no_eligible_quote")

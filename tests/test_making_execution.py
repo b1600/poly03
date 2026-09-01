@@ -6,6 +6,7 @@ import pytest
 
 from poly03.classifier.rules import Classification
 from poly03.classifier.taxonomy import Tier
+from poly03.config import MAKING_QUOTE_SIZE_MULTIPLE
 from poly03.data.models import OrderBook
 from poly03.making.execution import (
     _PHASE0_SIZING,
@@ -235,7 +236,10 @@ def test_partial_leg_failure_rolls_back_the_successful_leg(market_factory):
     clob.set_post_side_effect(fail_no_leg)
     gamma = FakeGamma([market])
 
-    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    # Big enough that a `min_size * MAKING_QUOTE_SIZE_MULTIPLE` quote clears
+    # the per-market inventory cap (0.25 of the cap at this bankroll) -- at
+    # $100 nothing is affordable and no leg is ever attempted.
+    state = LiveMakingState(bankroll_cap_usd=200.0, cash_usd=200.0)
     from poly03.making.execution import refresh_universe
 
     universe = refresh_universe(gamma, clob, max_gamma_markets=10)
@@ -324,7 +328,7 @@ def test_stale_order_cancelled_even_when_budget_exhausted_for_replacement(market
     # Bankroll is mostly committed to the other market, so there's no room
     # left to place a replacement quote here -- the stale order must still
     # get cancelled even though it can't be replaced this tick.
-    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    state = LiveMakingState(bankroll_cap_usd=200.0, cash_usd=200.0)
     state.open_orders.append(
         LiveOrder(
             order_id="fresh-order-other",
@@ -334,7 +338,7 @@ def test_stale_order_cancelled_even_when_budget_exhausted_for_replacement(market
             question=market_other.question,
             side="buy",
             price=0.90,
-            size_shares=100,
+            size_shares=200,  # $180 of the $200 cap -- no room for a replacement
             quoted_midpoint=0.90,  # matches current book mid -- not stale
         )
     )
@@ -384,6 +388,31 @@ def test_sizing_fractions_at_or_above_10k_uses_phase0_defaults():
     assert _sizing_fractions(50_000.0) == _PHASE0_SIZING
 
 
+# --- the suite must never write to production run state ---------------------
+
+
+def test_decision_logging_is_sandboxed_away_from_the_live_log():
+    """A test run once appended ~80 fabricated placements and cancels to the
+    real `making_live_decisions.jsonl`, because several tests call
+    `run_live_tick`/`_place_side` without a `decision_log_path` and the
+    module default is the production path. Those entries then read as real
+    activity minutes after the live loop had actually stopped. conftest's
+    autouse fixture intercepts the write; this asserts it is in force."""
+    from pathlib import Path
+
+    from poly03.config import MAKING_LIVE_DECISION_LOG_FILE
+    from poly03.making.live_state import log_event
+
+    live = Path(MAKING_LIVE_DECISION_LOG_FILE)
+    before = live.stat().st_mtime_ns if live.exists() else None
+
+    # Deliberately taking the default path -- the exact call shape that leaked.
+    log_event({"kind": "place", "market_id": "should-never-reach-production"})
+
+    after = live.stat().st_mtime_ns if live.exists() else None
+    assert after == before, f"{MAKING_LIVE_DECISION_LOG_FILE} was written to by the test suite"
+
+
 # --- affordability ranking (task item 1c) -----------------------------------
 
 
@@ -396,9 +425,25 @@ def test_rank_affordable_excludes_markets_over_budget(market_factory):
     cheap = _qm(m1, min_size=20, daily=1.0)  # low reward rate but affordable
     expensive = _qm(m2, min_size=1000, daily=1000.0)  # huge rate, unaffordable
 
-    ranked = _rank_affordable([expensive, cheap], per_market_budget_usd=25.0)
+    # A two-sided quote costs `min_size * MAKING_QUOTE_SIZE_MULTIPLE` dollars,
+    # not `min_size` -- budget the cheap market in and the expensive one out.
+    budget = 20 * MAKING_QUOTE_SIZE_MULTIPLE + 5.0
+    ranked = _rank_affordable([expensive, cheap], per_market_budget_usd=budget)
 
     assert [qm.market.id for qm in ranked] == ["cheap"]
+
+
+def test_rank_affordable_budgets_the_quoted_size_not_the_bare_minimum(market_factory):
+    """A market affordable at bare min_size but not at the size we actually
+    quote must not be ranked in -- it would only be skipped later by the
+    inventory cap, displacing a market we could have quoted."""
+    m = market_factory("Marginal?", best_bid=0.48, best_ask=0.52)
+    m.id = "marginal"
+    marginal = _qm(m, min_size=20, daily=10.0)
+
+    just_under = 20 * MAKING_QUOTE_SIZE_MULTIPLE - 1.0
+    assert _rank_affordable([marginal], per_market_budget_usd=just_under) == []
+    assert _rank_affordable([marginal], per_market_budget_usd=just_under + 2.0) == [marginal]
 
 
 def test_rank_affordable_orders_by_reward_density_per_dollar(market_factory):
@@ -410,7 +455,9 @@ def test_rank_affordable_orders_by_reward_density_per_dollar(market_factory):
     low_density = _qm(m1, min_size=20, daily=5.0)  # $0.25/share
     high_density = _qm(m2, min_size=20, daily=20.0)  # $1.00/share
 
-    ranked = _rank_affordable([low_density, high_density], per_market_budget_usd=25.0)
+    ranked = _rank_affordable(
+        [low_density, high_density], per_market_budget_usd=20 * MAKING_QUOTE_SIZE_MULTIPLE + 5.0
+    )
 
     assert [qm.market.id for qm in ranked] == ["b", "a"]
 
@@ -612,6 +659,98 @@ def test_market_pause_clears_once_a_later_fill_scores_within_threshold():
     assert "m" not in state.paused_markets
 
 
+# --- leaving the universe is not a reason to pay the spread -----------------
+#
+# Unwinding on *any* universe drop turned a wobble across a threshold (24h
+# volume near $1k, spread tightening to a tick, a reward-rate reshuffle) into
+# a forced taker sale. It shows in the trade history as synchronised
+# liquidation bursts on the refresh boundary (2026-09-01: 05:20, 08:23,
+# 08:53), median hold 58 minutes. Only a deadline should unwind now.
+
+
+def _state_holding(market_id="gone", token_id="111", **pos_kw):
+    from poly03.making.live_state import LiveInventory, LiveOrder
+
+    state = LiveMakingState(bankroll_cap_usd=200.0, cash_usd=200.0)
+    state.positions.append(
+        LiveInventory(
+            market_id=market_id, condition_id="0xgone", token_id=token_id,
+            question="q", net_shares=20.0, avg_price=0.49, **pos_kw
+        )
+    )
+    state.add_order(
+        LiveOrder(
+            order_id="resting", market_id=market_id, condition_id="0xgone",
+            token_id=token_id, question="q", side="buy", price=0.49,
+            size_shares=20, quoted_midpoint=0.50,
+        )
+    )
+    return state
+
+
+def test_market_leaving_the_universe_cancels_quotes_but_holds_inventory():
+    clob = FakeClob(books={"111": _book(best_bid=0.48, best_ask=0.52)})
+    state = _state_holding()
+
+    report = run_live_tick(
+        state, universe=UniverseReport(), gamma=FakeGamma([]), clob=clob,
+        max_markets_quoted=10, dry_run=False,
+    )
+
+    assert clob.posted == []  # nothing sold
+    assert state.open_orders == []  # but the quote is pulled
+    assert state.positions[0].net_shares == 20.0
+    assert "left_universe_holding_inventory" in report.skipped
+
+
+def test_market_inside_the_flatten_window_still_unwinds():
+    clob = FakeClob(books={"111": _book(best_bid=0.48, best_ask=0.52)})
+    state = _state_holding()
+
+    universe = UniverseReport()
+    universe.require_unwind("gone", "resolving_within_flatten_window")
+
+    run_live_tick(
+        state, universe=universe, gamma=FakeGamma([]), clob=clob,
+        max_markets_quoted=10, dry_run=False,
+    )
+
+    assert len(clob.posted) == 1
+    assert clob.posted[0]["side"] == "SELL"
+
+
+def test_a_position_past_its_own_deadline_unwinds_even_if_never_rescanned():
+    """select_universe breaks at the 24h-volume floor, so a market that goes
+    quiet is never scanned again and can never be reported as resolving. The
+    deadline stamped on the position is what stops it being held into
+    resolution anyway."""
+    clob = FakeClob(books={"111": _book(best_bid=0.48, best_ask=0.52)})
+    soon = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
+    state = _state_holding(end_date_iso=soon)
+
+    run_live_tick(
+        state, universe=UniverseReport(), gamma=FakeGamma([]), clob=clob,
+        max_markets_quoted=10, dry_run=False,
+    )
+
+    assert len(clob.posted) == 1
+    assert clob.posted[0]["side"] == "SELL"
+
+
+def test_a_distant_deadline_does_not_unwind():
+    clob = FakeClob(books={"111": _book(best_bid=0.48, best_ask=0.52)})
+    far = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
+    state = _state_holding(end_date_iso=far)
+
+    run_live_tick(
+        state, universe=UniverseReport(), gamma=FakeGamma([]), clob=clob,
+        max_markets_quoted=10, dry_run=False,
+    )
+
+    assert clob.posted == []
+    assert state.positions[0].net_shares == 20.0
+
+
 # --- cancel-on-halt (task item 5) -------------------------------------------
 
 
@@ -787,6 +926,82 @@ def test_flatten_position_writes_off_dust_below_minimum_tradable_size():
     assert state.open_orders == []
     assert pos.net_shares == 0.0
     assert any("below the exchange's minimum tradable size" in e for e in report.errors)
+
+
+# --- flatten prices passively before it crosses -----------------------------
+#
+# Crossing on the first tick is what made the exits cost -4.99c/share against
+# a 2-4c gross spread (23 of 29 losing round trips, 2026-08-31/09-01). We are
+# the maker on the way in; be the maker on the way out too, until the
+# resolution deadline actually forces the issue.
+
+
+def _long_position(net_shares=20.0, avg_price=0.49, **kw):
+    from poly03.making.live_state import LiveInventory
+
+    return LiveInventory(
+        market_id="m1", condition_id="0xabc", token_id="111", question="q",
+        net_shares=net_shares, avg_price=avg_price, **kw
+    )
+
+
+def test_flatten_rests_at_the_mid_instead_of_hitting_the_bid():
+    from poly03.making.execution import _flatten_position
+
+    clob = FakeClob(books={"111": _book(best_bid=0.48, best_ask=0.52)})
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    pos = _long_position()
+    state.positions.append(pos)
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+
+    _flatten_position(state, clob, pos, report, dry_run=False, decision_log_path="/dev/null")
+
+    # Mid is 0.50; hitting the bid would have sold at 0.48.
+    assert clob.posted[0]["price"] == pytest.approx(0.50)
+    assert report.flattened[0]["reason"] == "flatten_passive_at_mid"
+    assert pos.flatten_started_at is not None
+
+
+def test_flatten_crosses_the_spread_once_the_passive_window_expires():
+    from poly03.making.execution import _flatten_position
+
+    clob = FakeClob(books={"111": _book(best_bid=0.48, best_ask=0.52)})
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    stale = (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat()
+    pos = _long_position(flatten_started_at=stale)
+    state.positions.append(pos)
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+
+    _flatten_position(state, clob, pos, report, dry_run=False, decision_log_path="/dev/null")
+
+    assert clob.posted[0]["price"] == pytest.approx(0.48)  # the touch
+    assert report.flattened[0]["reason"] == "flatten_crossing_after_timeout"
+
+
+def test_passive_flatten_never_rests_inside_or_across_the_touch():
+    """A one-tick spread leaves no room between the bid and the mid, so the
+    passive price must fall back to something that still rests as a maker
+    rather than crossing."""
+    from poly03.making.execution import _passive_flatten_price
+
+    book = _book(best_bid=0.48, best_ask=0.49)
+    price = _passive_flatten_price(book, "ask", 0.01, touch_price=0.48)
+    assert price > 0.48  # not a taker sell into the bid
+    assert price <= 0.49  # not resting past the offer
+
+
+def test_flatten_timer_resets_once_the_position_goes_flat():
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    pos = _long_position(flatten_started_at="2020-01-01T00:00:00+00:00")
+    state.positions.append(pos)
+
+    state.record_fill(
+        market_id="m1", condition_id="0xabc", token_id="111", question="q",
+        side="sell", price=0.50, size_shares=20.0, order_id="o1",
+    )
+
+    assert pos.net_shares == 0.0
+    assert pos.flatten_started_at is None
 
 
 # --- fill reconciliation: matched size is booked exactly once (2026-08-31) ---

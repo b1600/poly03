@@ -26,6 +26,7 @@ from dataclasses import dataclass
 
 from poly03.config import (
     MAKING_INVENTORY_SKEW_SATURATION,
+    MAKING_MIN_PAIR_CAPTURE_CENTS,
     MAKING_QUOTE_SAFETY_MARGIN_CENTS,
 )
 from poly03.making.rewards import RewardConfig, combine_sides, order_score
@@ -98,6 +99,29 @@ def _eligible_distance(reward: RewardConfig) -> float:
     return cents / 100.0
 
 
+def _locks_in_a_loss(leg_price: float, opposite_avg_price: float | None) -> bool:
+    """Would filling this leg complete a Yes/No pair that costs $1.00 or more
+    for a $1.00 payout?
+
+    Both legs of a Book M quote are BUYs -- a bid buys YES at `b`, an ask
+    buys NO at `1 - a` (see execution.py's `_place_side`). Holding one share
+    of each pays out exactly $1.00 at resolution regardless of the outcome,
+    so the pair is profitable only while `paid_yes + paid_no < 1.00`.
+
+    Within one `QuotePair` that is automatic: `b + (1 - a) = 1 - spread`,
+    and `bid_price < ask_price` is enforced above. Across time it is not.
+    The mid moves between the two fills, and a quote that keeps chasing it
+    ends up buying both sides at a combined price above par -- which is a
+    realised loss the instant the second leg fills, not a mark-to-market
+    one. `leg_price` here is what this leg would actually pay (already
+    NO-converted for the ask side), and `opposite_avg_price` is what the
+    inventory on the other token cost. None means we hold nothing to pair
+    against, so there is nothing to lock in."""
+    if opposite_avg_price is None:
+        return False
+    return leg_price + opposite_avg_price >= 1.0 - MAKING_MIN_PAIR_CAPTURE_CENTS / 100.0
+
+
 def inventory_skew(net_shares: float, inventory_cap_shares: float) -> float:
     """+1 = maximally long (stop bidding), -1 = maximally short (stop offering)."""
     if inventory_cap_shares <= 0:
@@ -118,8 +142,16 @@ def build_quote_pair(
     target_size_shares: float,
     net_inventory_shares: float = 0.0,
     inventory_cap_shares: float = 0.0,
+    yes_avg_price: float | None = None,
+    no_avg_price: float | None = None,
 ) -> QuotePair:
-    """Construct the two-sided quote we would rest in this market."""
+    """Construct the two-sided quote we would rest in this market.
+
+    `yes_avg_price`/`no_avg_price` are the average cost of inventory already
+    held on each token, or None where we hold none. They are used only by
+    the §3.2 pair-cost guard (`_locks_in_a_loss`) -- a leg that would
+    complete a losing Yes/No pair against what we already hold is suppressed
+    rather than priced."""
     midpoint = (best_bid + best_ask) / 2.0
     pair = QuotePair(
         market_id=market_id,
@@ -153,14 +185,23 @@ def build_quote_pair(
 
     # An order below min_size scores nothing, so post it at full size or not
     # at all -- never a stub that carries risk without earning.
-    if bid_size >= reward.min_size:
-        pair.bid = Quote(side="bid", price=bid_price, size_shares=bid_size)
-    else:
+    #
+    # The pair-cost guard is checked per leg against the *opposite* token's
+    # inventory: a bid buys YES at `bid_price` and pairs against NO we hold,
+    # an ask buys NO at `1 - ask_price` and pairs against YES we hold.
+    if bid_size < reward.min_size:
         pair.suppressed.append("bid_below_reward_min_size")
-    if ask_size >= reward.min_size:
-        pair.ask = Quote(side="ask", price=ask_price, size_shares=ask_size)
+    elif _locks_in_a_loss(bid_price, no_avg_price):
+        pair.suppressed.append("bid_would_lock_in_a_losing_pair")
     else:
+        pair.bid = Quote(side="bid", price=bid_price, size_shares=bid_size)
+
+    if ask_size < reward.min_size:
         pair.suppressed.append("ask_below_reward_min_size")
+    elif _locks_in_a_loss(1.0 - ask_price, yes_avg_price):
+        pair.suppressed.append("ask_would_lock_in_a_losing_pair")
+    else:
+        pair.ask = Quote(side="ask", price=ask_price, size_shares=ask_size)
 
     return pair
 

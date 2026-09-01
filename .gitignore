@@ -26,6 +26,10 @@ paper_trade.log
 making_state.json
 making_decisions.jsonl
 
+# Snapshots pulled off the live box by sync_remote.sh. Copies of remote run
+# state -- never edit these, and never let them be mistaken for the truth.
+remote_snapshot/
+
 # All JSON/JSONL/log files (local run state / data, not source)
 #*.json
 #*.jsonl

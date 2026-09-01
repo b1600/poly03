@@ -213,6 +213,27 @@ MAKING_FLATTEN_HOURS_BEFORE_RESOLUTION = _env_float("MAKING_FLATTEN_HOURS_BEFORE
 # quote strictly inside it so a one-tick mid move doesn't drop us out of reward
 # eligibility before the next scan.
 MAKING_QUOTE_SAFETY_MARGIN_CENTS = _env_float("MAKING_QUOTE_SAFETY_MARGIN_CENTS", 0.5)
+# How many multiples of `reward.min_size` to quote per side.
+#
+# Must be > 1.0, and the reason is the whole point. `min_size` is a cliff:
+# an order below it scores no rewards at all, so quoting *exactly* min_size
+# makes the §3.2 inventory skew a binary switch instead of a taper --
+# `bid_size = target * (1 - skew)` clears `>= min_size` only when skew is
+# exactly zero, so the first share of inventory in a market amputates a
+# whole side. That matters more than it sounds: rewards.combine_sides
+# returns 0 for a one-sided quote at any midpoint in (0.10, 0.90), so the
+# book earned *nothing* in precisely the markets where it was carrying
+# inventory risk (measured 2026-08-31/09-01: 9 of 11 ticks one-sided in
+# 561974, 29 ticks in 3953548, against $2.88 of rewards for $50 of loss).
+#
+# At 2.0 the adding side survives until skew reaches 0.5, so inventory
+# genuinely tapers the quote instead of deleting it. The cost is real and
+# accepted: collateral per market doubles, so a small bankroll reaches
+# roughly half as many markets, and markets whose min_size exceeds
+# `inventory_fraction * bankroll / multiple` drop out entirely. Quoting
+# fewer markets in a state that can actually earn beats quoting twice as
+# many that structurally cannot.
+MAKING_QUOTE_SIZE_MULTIPLE = _env_float("MAKING_QUOTE_SIZE_MULTIPLE", 2.0)
 MAKING_MAX_MARKETS_QUOTED = int(_env_float("MAKING_MAX_MARKETS_QUOTED", 40))
 MAKING_MAX_DEPLOYED_FRACTION = _env_float("MAKING_MAX_DEPLOYED_FRACTION", 0.60)
 MAKING_MAX_INVENTORY_PER_MARKET_FRACTION = _env_float("MAKING_MAX_INVENTORY_PER_MARKET_FRACTION", 0.02)
@@ -329,6 +350,52 @@ MAKING_LIVE_MAX_RESOLUTION_SOURCE_FRACTION = _env_float("MAKING_LIVE_MAX_RESOLUT
 # MAKING_MIN_PRICE globally, since that constant also gates Phase 0's paper
 # universe and shouldn't change for a live-only concern.
 MAKING_LIVE_MIN_NOTIONAL_USD = _env_float("MAKING_LIVE_MIN_NOTIONAL_USD", 1.0)
+
+# Never complete a Yes/No pair that costs more than $1.00 for a $1.00
+# payout. Both legs of a Book M quote are BUYs (a "bid" buys YES at b, an
+# "ask" buys NO at 1-a), so holding both legs pays out exactly $1.00 per
+# matched pair. Within a *single* quote pair that is always profitable --
+# b + (1 - a) = 1 - spread < 1. Across *time* it is not: the mid moves
+# between the two fills, and the book kept buying the side the market was
+# running toward. Measured 2026-08-31/09-01, 7 of the 14 markets where both
+# legs filled had paired cost above 1.00 (Gemini Flash 1.249, Rasilingwane
+# 1.139, Poprad 1.050, Grok 1.037), locking in -$8.99 at the moment of the
+# fill, before any price movement.
+#
+# So the guard has to be against *existing inventory*, not against the pair
+# being placed: never post a leg whose fill would pair with what we already
+# hold on the opposite token at a combined cost >= $1.00 - this margin.
+# 0.0 blocks only genuine loss-locking; raise it to demand real capture.
+MAKING_MIN_PAIR_CAPTURE_CENTS = _env_float("MAKING_MIN_PAIR_CAPTURE_CENTS", 0.0)
+
+# How long a flatten is worked passively (resting at the midpoint, re-priced
+# every tick) before it gives up and crosses the spread.
+#
+# `_flatten_position` used to price at `book.best_bid` immediately -- a
+# taker sell at the touch. Combined with unwinding on *any* universe drop
+# (see MAKING_UNWIND_ON_UNIVERSE_DROP), that was the single largest cost in
+# the book: 23 of 29 round trips in the 2026-08-31/09-01 window lost money,
+# averaging -4.99c/share against a 2-4c quoted spread, with the worst at
+# -15c. Resting at the mid gives up the spread only when the deadline
+# actually forces it.
+MAKING_FLATTEN_PASSIVE_MINUTES = _env_float("MAKING_FLATTEN_PASSIVE_MINUTES", 30.0)
+
+# Whether a market leaving the quotable universe forces an inventory unwind.
+#
+# False (the default now) means only a real deadline unwinds a position: the
+# §3.2 flatten-before-resolution window, checked both via the universe scan
+# and via the position's own stamped end date (so a market that goes quiet
+# and drops out of the scan entirely is still flattened before it resolves).
+# Everything else -- 24h volume dipping under $1k, the spread tightening to
+# one tick, a reward-rate reshuffle -- cancels the resting quotes and holds
+# the inventory.
+#
+# The old behaviour treated all of those as unwind triggers, which turned a
+# threshold wobble into a forced taker sale. The 2026-09-01 sells arrive in
+# synchronised bursts on the universe-refresh boundary (05:20 across 2
+# markets, 08:23 across 3, 08:53 across 3) -- that is this setting, not a
+# risk decision. Median hold before a forced dump was 58 minutes.
+MAKING_UNWIND_ON_UNIVERSE_DROP = _env("MAKING_UNWIND_ON_UNIVERSE_DROP", "false").lower() in ("true", "1", "yes")
 
 # task item 4: bounds how late a markout horizon can be stamped. Outside
 # [horizon, horizon + slack] minutes old, the fill is left unscored rather

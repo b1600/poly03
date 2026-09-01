@@ -707,6 +707,99 @@ def cmd_make_live_reset(args: argparse.Namespace) -> None:
     _log(f"Book M live state reset: bankroll_cap=${cap:,.2f}  cash=${cash:,.2f}  state_file={args.state_file}")
 
 
+def cmd_make_live_rebuild(args: argparse.Namespace) -> None:
+    """Reseed the live state from the exchange rather than from local belief.
+    See making/rebuild.py for why every field comes from an API read."""
+    import shutil
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from poly03.config import MAKING_LIVE_BANKROLL_CAP_USD, get_credentials
+    from poly03.data.clob import ClobClient
+    from poly03.data.gamma import GammaClient
+    from poly03.making.live_state import save_state
+    from poly03.making.rebuild import build_state
+
+    creds = get_credentials()
+    address = args.address or creds.funder_address
+    if not address:
+        _log("FAIL: no POLYMARKET_FUNDER_ADDRESS in the environment and no --address given.")
+        return
+
+    cap = args.bankroll_cap if args.bankroll_cap is not None else MAKING_LIVE_BANKROLL_CAP_USD
+
+    clob = None
+    try:
+        clob = ClobClient(creds)
+    except Exception as exc:
+        _log(f"WARN: no CLOB client ({exc}) -- open orders and cash cannot be read.")
+    if clob is not None and args.cash is None:
+        _log("reading USDC balance from the CLOB (needs L2 creds; pass --cash to skip)...")
+
+    _log(f"rebuilding Book M live state for {address} ...")
+    state, report = build_state(
+        address=address,
+        bankroll_cap_usd=cap,
+        gamma=GammaClient(),
+        clob=clob,
+        cash_usd=args.cash,
+        verify_chain=args.verify_chain,
+    )
+
+    _log("")
+    _log(f"cash (USDC collateral):        ${report.cash_usd:>10,.2f}")
+    _log(f"open positions:                {len(report.positions):>10}   cost ${report.inventory_cost_usd:,.2f}  value ${report.inventory_value_usd:,.2f}")
+    _log(f"resting orders adopted:        {len(report.orders):>10}")
+    _log(f"equity (cash + marked value):  ${state.equity_usd:>10,.2f}")
+    _log(f"bankroll cap:                  ${cap:>10,.2f}")
+
+    if report.redeemable:
+        _log("")
+        _log(
+            f"excluded {len(report.redeemable)} resolved/worthless position(s) worth "
+            f"${report.redeemable_value_usd:,.2f} -- these are redemption claims, not"
+        )
+        _log("tradeable inventory. Redeem them in the Polymarket UI; they are not in this state.")
+
+    if report.unresolved:
+        _log("")
+        _log(f"WARN: {len(report.unresolved)} position(s) could not be matched to a Gamma market.")
+        _log("They are recorded (so capital and cluster caps still count them) but keyed on")
+        _log("condition_id, so the engine will hold them and never quote them:")
+        for line in report.unresolved:
+            _log(f"  - {line}")
+
+    for line in report.chain_mismatches:
+        _log(f"CHAIN DRIFT: {line}")
+    for line in report.notes:
+        _log(f"NOTE: {line}")
+
+    if state.equity_usd > cap:
+        _log("")
+        _log(
+            f"WARN: equity ${state.equity_usd:,.2f} exceeds the bankroll cap ${cap:,.2f}. The engine "
+            "will not deploy new capital"
+        )
+        _log("until it fits; pass a larger --bankroll-cap if that is not what you want.")
+
+    if args.dry_run:
+        _log("")
+        _log(f"--dry-run: nothing written. Re-run without it to write {args.state_file}.")
+        return
+
+    path = Path(args.state_file)
+    if path.exists():
+        backup = path.with_suffix(path.suffix + f".bak.{datetime.now(timezone.utc):%Y%m%dT%H%M%S}")
+        shutil.copy2(path, backup)
+        _log(f"\nbacked up existing state to {backup}")
+
+    save_state(state, args.state_file)
+    _log(f"wrote {args.state_file}")
+    _log("")
+    _log("Check the figures above against the Polymarket portfolio page before going --live.")
+    _log("`python check_pnl.py --hours 1` reads the same wallet independently.")
+
+
 def cmd_make_live_preflight(args: argparse.Namespace) -> None:
     """task item 6: everything that needs to be right before the first
     --live, checked without placing an order. Informative, not a hard gate
@@ -1042,6 +1135,32 @@ def build_parser() -> argparse.ArgumentParser:
         "from what the wallet actually holds.",
     )
     p_lreset.set_defaults(func=cmd_make_live_reset)
+
+    p_lrebuild = live_sub.add_parser(
+        "rebuild",
+        help="reseed live state from the exchange's real positions/orders/cash (use after any drift incident)",
+    )
+    p_lrebuild.add_argument("--state-file", default=MAKING_LIVE_STATE_FILE)
+    p_lrebuild.add_argument("--bankroll-cap", type=float, default=None)
+    p_lrebuild.add_argument(
+        "--cash",
+        type=float,
+        default=None,
+        help="override the USDC balance instead of reading it from the CLOB (which needs L2 creds)",
+    )
+    p_lrebuild.add_argument("--address", default=None, help="override POLYMARKET_FUNDER_ADDRESS")
+    p_lrebuild.add_argument(
+        "--verify-chain",
+        action="store_true",
+        help="cross-check every position's share count against its on-chain ERC1155 balance "
+        "(one call per position, slow, but catches data-api drift)",
+    )
+    p_lrebuild.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print what would be written without touching the state file",
+    )
+    p_lrebuild.set_defaults(func=cmd_make_live_rebuild)
 
     p_lrun = live_sub.add_parser("run", help="tick forever on an interval, Ctrl+C to stop")
     _add_live_args(p_lrun)

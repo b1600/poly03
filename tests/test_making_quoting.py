@@ -111,6 +111,53 @@ def test_partial_inventory_shrinks_only_the_adding_side():
     assert pair.ask.size_shares == pytest.approx(100.0)
 
 
+# --- pair-cost guard --------------------------------------------------------
+#
+# Both legs are BUYs (a bid buys YES at b, an ask buys NO at 1-a), so holding
+# one of each pays out exactly $1.00. Within a single pair that is always
+# profitable, but across time the mid moves and the book kept completing pairs
+# above par: 7 of 14 markets on 2026-08-31/09-01, worst at 1.249, -$8.99
+# locked in at the fill.
+
+
+def test_bid_suppressed_when_it_would_complete_a_losing_pair():
+    # Holding NO at 0.60 -- a YES bid at 0.49 pairs to 1.09 for a $1 payout.
+    pair = _pair(best_bid=0.48, best_ask=0.52, no_avg_price=0.60)
+    assert pair.bid is None
+    assert "bid_would_lock_in_a_losing_pair" in pair.suppressed
+    # The exit side is untouched: offering NO reduces that inventory.
+    assert pair.ask is not None
+
+
+def test_ask_suppressed_when_it_would_complete_a_losing_pair():
+    # Holding YES at 0.60; the ask at 0.51 buys NO at 0.49, pairing to 1.09.
+    pair = _pair(best_bid=0.48, best_ask=0.52, yes_avg_price=0.60)
+    assert pair.ask is None
+    assert "ask_would_lock_in_a_losing_pair" in pair.suppressed
+    assert pair.bid is not None
+
+
+def test_both_legs_survive_when_the_pair_still_captures():
+    # Holding NO at 0.30: a YES bid at 0.49 pairs to 0.79, well under par.
+    pair = _pair(best_bid=0.48, best_ask=0.52, no_avg_price=0.30, yes_avg_price=0.30)
+    assert pair.bid is not None
+    assert pair.ask is not None
+    assert not any("lock_in" in s for s in pair.suppressed)
+
+
+def test_no_inventory_means_nothing_to_lock_in_against():
+    pair = _pair(best_bid=0.48, best_ask=0.52, yes_avg_price=None, no_avg_price=None)
+    assert pair.bid is not None and pair.ask is not None
+
+
+def test_a_single_pair_can_never_trip_the_guard():
+    """b + (1 - a) = 1 - spread, and bid < ask is enforced, so one quote pair
+    is profitable by construction -- the guard only ever fires against
+    inventory bought at an earlier midpoint."""
+    pair = _pair(best_bid=0.48, best_ask=0.52)
+    assert pair.bid.price + (1.0 - pair.ask.price) < 1.0
+
+
 # --- collateral -------------------------------------------------------------
 
 
