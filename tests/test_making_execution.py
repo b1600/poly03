@@ -764,6 +764,31 @@ def test_flatten_position_skips_when_no_real_balance_remains():
     assert state.open_positions == []
 
 
+def test_flatten_position_writes_off_dust_below_minimum_tradable_size():
+    """A leftover position smaller than the exchange's minimum expressible
+    size (2 decimal places of a share -- see _MIN_TRADABLE_SHARES) rounds to
+    a maker_amount of 0 in py_clob_client_v2's order builder, which the
+    exchange rejects with 'invalid maker amount'. That's not transient, so
+    retrying it every tick just repeats the same failure forever (2026-09-01
+    incident: identical 'invalid maker amount' error, same token, every tick,
+    indefinitely). Must write the dust off instead of attempting to sell it."""
+    from poly03.making.execution import _flatten_position
+    from poly03.making.live_state import LiveInventory
+
+    clob = FakeClob(books={"111": _book(best_bid=0.48, best_ask=0.52)})
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    pos = LiveInventory(market_id="m1", condition_id="0xabc", token_id="111", question="q", net_shares=0.004, avg_price=0.49)
+    state.positions.append(pos)
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+
+    _flatten_position(state, clob, pos, report, dry_run=False, decision_log_path="/dev/null")
+
+    assert clob.posted == []
+    assert state.open_orders == []
+    assert pos.net_shares == 0.0
+    assert any("below the exchange's minimum tradable size" in e for e in report.errors)
+
+
 # --- fill reconciliation: matched size is booked exactly once (2026-08-31) ---
 #
 # The incident: an order's matched size was re-booked as new fills every time

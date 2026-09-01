@@ -95,6 +95,15 @@ logger = logging.getLogger("poly03.making.execution")
 _SIDE_TO_ORDER_SIDE = {"bid": BUY, "ask": SELL}
 _CLOSED_STATUSES = {"MATCHED", "CANCELED", "CANCELLED", "EXPIRED", "FAILED"}
 
+# py_clob_client_v2's order builder rounds share size down to 2 decimal
+# places before computing maker_amount (see ROUNDING_CONFIG/get_order_amounts
+# in order_builder/builder.py -- true for every tick size). A position below
+# this floor rounds to a maker_amount of 0, which the exchange rejects with
+# "invalid maker amount" -- not a transient error, so retrying every tick
+# just repeats the same failure forever. _flatten_position treats dust below
+# this floor as unsellable and writes it off instead of attempting a sell.
+_MIN_TRADABLE_SHARES = 0.01
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -1044,6 +1053,21 @@ def _flatten_position(
     no-naked-shorting placement -- see _place_side), but the buy-if-short
     branch is kept for defensiveness against accounting edge cases."""
     if abs(pos.net_shares) < 1e-9:
+        return
+
+    if abs(pos.net_shares) < _MIN_TRADABLE_SHARES:
+        # Below the exchange's minimum expressible size -- any sell attempt
+        # would round to a maker_amount of 0 and fail with "invalid maker
+        # amount" every tick, forever (see _MIN_TRADABLE_SHARES). There's no
+        # way to actually close this out, so write it off like the on-chain
+        # balance drift case below: net_shares is truth-adjusted, avg_price/
+        # realized_pnl_usd are left alone since there's no price to
+        # attribute the dust to.
+        report.error(
+            f"flatten: {pos.market_id} ({pos.token_id}) net_shares={pos.net_shares:g} is below the "
+            f"exchange's minimum tradable size ({_MIN_TRADABLE_SHARES:g}) -- writing off as dust"
+        )
+        pos.net_shares = 0.0
         return
 
     try:
