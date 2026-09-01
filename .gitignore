@@ -27,9 +27,9 @@ making_state.json
 making_decisions.jsonl
 
 # All JSON/JSONL/log files (local run state / data, not source)
-*.json
-*.jsonl
-*.log
+#*.json
+#*.jsonl
+#*.log
 
-making_live_state.json.bak.20260831T205444
-making_live_state.json.bak.20260831T205925_precash
+#making_live_state.json.bak.20260831T205444
+#making_live_state.json.bak.20260831T205925_precash

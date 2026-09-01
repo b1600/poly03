@@ -1,0 +1,2101 @@
+{
+  "bankroll_cap_usd": 500.0,
+  "cash_usd": 347.89599999999996,
+  "positions": [
+    {
+      "market_id": "2865352",
+      "condition_id": "0x73eb13f81fcbde08320465b211f5567bd211c026351a5eaf2d0215c982c87a44",
+      "token_id": "44021269444678203727823899928573348463992834861377765933361271673087747316379",
+      "question": "Will Betty Gilpin \u2013 \u201cWidow\u2019s Bay\u201d win Emmys 2026: Outstanding guest actress in a comedy series?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Betty Gilpin \u2013 \u201cWidow\u2019s Bay\u201d",
+        "themes": [
+          "TV",
+          "Emmys",
+          "Awards",
+          "Culture"
+        ],
+        "geography": null,
+        "resolution_source": "theemmys.tv",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "2865352",
+      "condition_id": "0x73eb13f81fcbde08320465b211f5567bd211c026351a5eaf2d0215c982c87a44",
+      "token_id": "111515707184512171895531671555030031955716649561689309889439649383999463201878",
+      "question": "Will Betty Gilpin \u2013 \u201cWidow\u2019s Bay\u201d win Emmys 2026: Outstanding guest actress in a comedy series?",
+      "net_shares": 40.0,
+      "avg_price": 0.712,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Betty Gilpin \u2013 \u201cWidow\u2019s Bay\u201d",
+        "themes": [
+          "TV",
+          "Emmys",
+          "Awards",
+          "Culture"
+        ],
+        "geography": null,
+        "resolution_source": "theemmys.tv",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": 0.6094999999999999
+    },
+    {
+      "market_id": "3961592",
+      "condition_id": "0x1c487f5d8ddcfa343f93ee1cfb3983572c509d59d0ae69dfe87e38e8052c6a86",
+      "token_id": "53116547501739372759139979057007980941744602020467429259664551538013851389474",
+      "question": "Will S&P 500 (SPY) hit (LOW) $750 Week of August 31 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "\u2193 $750",
+        "themes": [
+          "Finance",
+          "Weekly",
+          "Hit Price",
+          "Hide From New",
+          "Finance Updown",
+          "Pyth Finance",
+          "Stocks",
+          "Equities",
+          "SPY"
+        ],
+        "geography": null,
+        "resolution_source": "pythdata.app",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3961592",
+      "condition_id": "0x1c487f5d8ddcfa343f93ee1cfb3983572c509d59d0ae69dfe87e38e8052c6a86",
+      "token_id": "24032762891577001318414552104831817238345196947964121399153133624852343190181",
+      "question": "Will S&P 500 (SPY) hit (LOW) $750 Week of August 31 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "\u2193 $750",
+        "themes": [
+          "Finance",
+          "Weekly",
+          "Hit Price",
+          "Hide From New",
+          "Finance Updown",
+          "Pyth Finance",
+          "Stocks",
+          "Equities",
+          "SPY"
+        ],
+        "geography": null,
+        "resolution_source": "pythdata.app",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3961591",
+      "condition_id": "0x4ea75bdb61f212041eb6160c76af5751ecfa8ceade170ae06ce372e2e5f9d8bb",
+      "token_id": "28017582421262386286105574458908303779075895347800283971537530164136877885817",
+      "question": "Will S&P 500 (SPY) hit (LOW) $755 Week of August 31 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "\u2193 $755",
+        "themes": [
+          "Finance",
+          "Weekly",
+          "Hit Price",
+          "Hide From New",
+          "Finance Updown",
+          "Pyth Finance",
+          "Stocks",
+          "Equities",
+          "SPY"
+        ],
+        "geography": null,
+        "resolution_source": "pythdata.app",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3961591",
+      "condition_id": "0x4ea75bdb61f212041eb6160c76af5751ecfa8ceade170ae06ce372e2e5f9d8bb",
+      "token_id": "12509191617043425137180134729148170146880903454863992774315758858658644832442",
+      "question": "Will S&P 500 (SPY) hit (LOW) $755 Week of August 31 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "\u2193 $755",
+        "themes": [
+          "Finance",
+          "Weekly",
+          "Hit Price",
+          "Hide From New",
+          "Finance Updown",
+          "Pyth Finance",
+          "Stocks",
+          "Equities",
+          "SPY"
+        ],
+        "geography": null,
+        "resolution_source": "pythdata.app",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3961663",
+      "condition_id": "0xb16bbf990b9dc62c6a6b8e9d7096b64267b8c3b8638d677874d23f0ad35f5315",
+      "token_id": "24190601165461769266961318718726741237974261337309503009268287475796737184196",
+      "question": "Will WTI Crude Oil (WTI) hit (HIGH) $90 Week of August 31 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "\u2191 $90",
+        "themes": [
+          "Finance",
+          "Weekly",
+          "Hit Price",
+          "Hide From New",
+          "Finance Updown",
+          "Pyth Finance",
+          "Commodities",
+          "Oil"
+        ],
+        "geography": null,
+        "resolution_source": "pythdata.app",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3961663",
+      "condition_id": "0xb16bbf990b9dc62c6a6b8e9d7096b64267b8c3b8638d677874d23f0ad35f5315",
+      "token_id": "101666672535482169084762728201265621707518539520488316220552821232138578864604",
+      "question": "Will WTI Crude Oil (WTI) hit (HIGH) $90 Week of August 31 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "\u2191 $90",
+        "themes": [
+          "Finance",
+          "Weekly",
+          "Hit Price",
+          "Hide From New",
+          "Finance Updown",
+          "Pyth Finance",
+          "Commodities",
+          "Oil"
+        ],
+        "geography": null,
+        "resolution_source": "pythdata.app",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3961676",
+      "condition_id": "0x4ef86d4d21242ca7758e49864c77e0e62bba25f27fa0d008d7ab549883672404",
+      "token_id": "82521193149275168360178940659060232371679448926659688190039879099655942010186",
+      "question": "Will Natural Gas (NG) hit (HIGH) $3.10 Week of August 31 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "\u2191 $3.10",
+        "themes": [
+          "Finance",
+          "Weekly",
+          "Hit Price",
+          "Hide From New",
+          "Finance Updown",
+          "Pyth Finance",
+          "Commodities",
+          "natural gas"
+        ],
+        "geography": null,
+        "resolution_source": "pythdata.app",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3961676",
+      "condition_id": "0x4ef86d4d21242ca7758e49864c77e0e62bba25f27fa0d008d7ab549883672404",
+      "token_id": "60218105694363799284334070448018245782214081820837124589970086749701667869909",
+      "question": "Will Natural Gas (NG) hit (HIGH) $3.10 Week of August 31 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "\u2191 $3.10",
+        "themes": [
+          "Finance",
+          "Weekly",
+          "Hit Price",
+          "Hide From New",
+          "Finance Updown",
+          "Pyth Finance",
+          "Commodities",
+          "natural gas"
+        ],
+        "geography": null,
+        "resolution_source": "pythdata.app",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3961680",
+      "condition_id": "0xee0f5fe250bdb3e04a6093969563c33e92cb61c4968a899475a19b1e41f930cb",
+      "token_id": "104398228167562622268726896774271872949146764228777378378433252420809586475177",
+      "question": "Will Natural Gas (NG) hit (LOW) $2.70 Week of August 31 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "\u2193 $2.70",
+        "themes": [
+          "Finance",
+          "Weekly",
+          "Hit Price",
+          "Hide From New",
+          "Finance Updown",
+          "Pyth Finance",
+          "Commodities",
+          "natural gas"
+        ],
+        "geography": null,
+        "resolution_source": "pythdata.app",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3961680",
+      "condition_id": "0xee0f5fe250bdb3e04a6093969563c33e92cb61c4968a899475a19b1e41f930cb",
+      "token_id": "100638387520348831832945750007553351068223442181085426566395645722346155846289",
+      "question": "Will Natural Gas (NG) hit (LOW) $2.70 Week of August 31 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "\u2193 $2.70",
+        "themes": [
+          "Finance",
+          "Weekly",
+          "Hit Price",
+          "Hide From New",
+          "Finance Updown",
+          "Pyth Finance",
+          "Commodities",
+          "natural gas"
+        ],
+        "geography": null,
+        "resolution_source": "pythdata.app",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3953548",
+      "condition_id": "0x8def5f772cd6aba88f032d6a4087be552e9948eddd897baa0fccef5aebd952ba",
+      "token_id": "45431785698259821622224770188969061251540295566137045288082575998913795773735",
+      "question": "Israel x Lebanon diplomatic meeting by September 13, 2026?",
+      "net_shares": 60.0,
+      "avg_price": 0.45799999999999996,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "September 13",
+        "themes": [
+          "Iran",
+          "Israel",
+          "Lebanon",
+          "Politics",
+          "Geopolitics",
+          "Israel x Iran"
+        ],
+        "geography": "Iran",
+        "resolution_source": "unknown",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": 0.39
+    },
+    {
+      "market_id": "3953548",
+      "condition_id": "0x8def5f772cd6aba88f032d6a4087be552e9948eddd897baa0fccef5aebd952ba",
+      "token_id": "82429104850929084251783210169465013917103056684803347841657068623347991956596",
+      "question": "Israel x Lebanon diplomatic meeting by September 13, 2026?",
+      "net_shares": 20.0,
+      "avg_price": 0.44000000000000006,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "September 13",
+        "themes": [
+          "Iran",
+          "Israel",
+          "Lebanon",
+          "Politics",
+          "Geopolitics",
+          "Israel x Iran"
+        ],
+        "geography": "Iran",
+        "resolution_source": "unknown",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": 0.61
+    },
+    {
+      "market_id": "2421094",
+      "condition_id": "0x8062cf78d93f9202f4c0a1018d141f4af35d486a368f07e65265f27d48b4e040",
+      "token_id": "35480485928147694422522317298160081194603766865102488154902775756915955129166",
+      "question": "Will Anthropic IPO by October 31, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "October 31, 2026",
+        "themes": [
+          "IPOs",
+          "Dario",
+          "Finance",
+          "IPO",
+          "Anthropic IPO",
+          "Anthropic"
+        ],
+        "geography": null,
+        "resolution_source": "unknown",
+        "date_bucket": "2027-07-01"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "2421094",
+      "condition_id": "0x8062cf78d93f9202f4c0a1018d141f4af35d486a368f07e65265f27d48b4e040",
+      "token_id": "85723516070077730883105909049388061597049173281613201910087943908235778734129",
+      "question": "Will Anthropic IPO by October 31, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "October 31, 2026",
+        "themes": [
+          "IPOs",
+          "Dario",
+          "Finance",
+          "IPO",
+          "Anthropic IPO",
+          "Anthropic"
+        ],
+        "geography": null,
+        "resolution_source": "unknown",
+        "date_bucket": "2027-07-01"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3866124",
+      "condition_id": "0x0d8957141db93c23d413ce0ee05948479e79daa4e1fc52e1a9fbe6a5d8d08840",
+      "token_id": "46581976420790673117270005952922269628832888723586801796820253283256171110332",
+      "question": "Will Donald Trump post 200+ Truth Social posts from August 28 to September 4, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "200+",
+        "themes": [
+          "Politics",
+          "Trump",
+          "Tweet Markets"
+        ],
+        "geography": null,
+        "resolution_source": "truthsocial.com",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3866124",
+      "condition_id": "0x0d8957141db93c23d413ce0ee05948479e79daa4e1fc52e1a9fbe6a5d8d08840",
+      "token_id": "95385921595954893972281366168283359320876708685707247415938805818631889756640",
+      "question": "Will Donald Trump post 200+ Truth Social posts from August 28 to September 4, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "200+",
+        "themes": [
+          "Politics",
+          "Trump",
+          "Tweet Markets"
+        ],
+        "geography": null,
+        "resolution_source": "truthsocial.com",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3721709",
+      "condition_id": "0x1bcd95f94c2955d1b88a988f54d857be1142249d91a96c7de92376b6f9281100",
+      "token_id": "94182141136213606663787621887560606302326381615179908246805677524783800680726",
+      "question": "Will Anthropic's IPO valuation be between $2.00T and $2.25T?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "$2.00\u2013$2.25T",
+        "themes": [
+          "Big Tech",
+          "Anthropic",
+          "Anthropic IPO",
+          "AI",
+          "IPO",
+          "Dario",
+          "IPOs",
+          "Claude",
+          "Finance"
+        ],
+        "geography": null,
+        "resolution_source": "unknown",
+        "date_bucket": "2027-12-28"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3721709",
+      "condition_id": "0x1bcd95f94c2955d1b88a988f54d857be1142249d91a96c7de92376b6f9281100",
+      "token_id": "53211470790588316738836805550847061223681692503538774694676723783564907198160",
+      "question": "Will Anthropic's IPO valuation be between $2.00T and $2.25T?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "$2.00\u2013$2.25T",
+        "themes": [
+          "Big Tech",
+          "Anthropic",
+          "Anthropic IPO",
+          "AI",
+          "IPO",
+          "Dario",
+          "IPOs",
+          "Claude",
+          "Finance"
+        ],
+        "geography": null,
+        "resolution_source": "unknown",
+        "date_bucket": "2027-12-28"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3553884",
+      "condition_id": "0xafe03ac32316ce79c3e911db5de76b0364e89004471292450d515351e85aa05e",
+      "token_id": "43448349055615037136545714661887017526635778810268423260950376826031710855874",
+      "question": "Will Steve Witkoff attend a US x Iran diplomatic meeting by December 31, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Steve Witkoff",
+        "themes": [
+          "Iran",
+          "Trump",
+          "US-Iran",
+          "Politics",
+          "Peace Deal",
+          "Geopolitics",
+          "Israel x Iran",
+          "Iran Ceasefire"
+        ],
+        "geography": "Iran",
+        "resolution_source": "unknown",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3553884",
+      "condition_id": "0xafe03ac32316ce79c3e911db5de76b0364e89004471292450d515351e85aa05e",
+      "token_id": "61749570067514015858669414264809880794006088711586060001319546520404782728706",
+      "question": "Will Steve Witkoff attend a US x Iran diplomatic meeting by December 31, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Steve Witkoff",
+        "themes": [
+          "Iran",
+          "Trump",
+          "US-Iran",
+          "Politics",
+          "Peace Deal",
+          "Geopolitics",
+          "Israel x Iran",
+          "Iran Ceasefire"
+        ],
+        "geography": "Iran",
+        "resolution_source": "unknown",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3685220",
+      "condition_id": "0xedf991f4a22493fdf4d948829c84d0d60606c5ad56d564b1fd76cef09146f364",
+      "token_id": "63995822663619450712063098574187960391018403811890737647357490962217132239735",
+      "question": "Will the next Claude Opus model debut at a score of at least 1500 by December 31, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "1500+",
+        "themes": [
+          "AI",
+          "Tech",
+          "Debut",
+          "Claude",
+          "Anthropic",
+          "AI Releases",
+          "Claude Opus"
+        ],
+        "geography": null,
+        "resolution_source": "arena.ai",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3685220",
+      "condition_id": "0xedf991f4a22493fdf4d948829c84d0d60606c5ad56d564b1fd76cef09146f364",
+      "token_id": "43942530175189397159741063023984126060583173122495751707752907990214652877936",
+      "question": "Will the next Claude Opus model debut at a score of at least 1500 by December 31, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "1500+",
+        "themes": [
+          "AI",
+          "Tech",
+          "Debut",
+          "Claude",
+          "Anthropic",
+          "AI Releases",
+          "Claude Opus"
+        ],
+        "geography": null,
+        "resolution_source": "arena.ai",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "1721600",
+      "condition_id": "0x42acc24abc6719af63729e181a726b3480cf2d312ba545cd1d7e053a70a0cbb6",
+      "token_id": "111529759888823866346712417917306420924992212809123776112531904982822620019187",
+      "question": "Will Oliver Marmol win the 2026 NL Manager of the Year?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Oliver Marmol",
+        "themes": [
+          "Awards",
+          "manager",
+          "baseball",
+          "MLB",
+          "Sports",
+          "MLB National League"
+        ],
+        "geography": null,
+        "resolution_source": "unknown",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "2000377",
+      "condition_id": "0x5e38b77551a62c844b4250a569ec2652f522b01312e428842bf03337405a555a",
+      "token_id": "89763889714159092645533540264041439687764921560664578503878401138227369261592",
+      "question": "Will Spider-Man: Brand New Day have the best domestic opening week in 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Spider-Man: Brand New Day",
+        "themes": [
+          "Movies",
+          "Culture",
+          "The Odyssey",
+          "Spider-Man"
+        ],
+        "geography": null,
+        "resolution_source": "www.the-numbers.com",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "2000377",
+      "condition_id": "0x5e38b77551a62c844b4250a569ec2652f522b01312e428842bf03337405a555a",
+      "token_id": "83807364550095283785247725753755474033908874895393195962686868246100593473172",
+      "question": "Will Spider-Man: Brand New Day have the best domestic opening week in 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Spider-Man: Brand New Day",
+        "themes": [
+          "Movies",
+          "Culture",
+          "The Odyssey",
+          "Spider-Man"
+        ],
+        "geography": null,
+        "resolution_source": "www.the-numbers.com",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "2036565",
+      "condition_id": "0x11e4689bacf621bca290111711b27a208420e1abaddef5fb1aeacef54ac02a7b",
+      "token_id": "29880061952566489686808125557917525240335275846871233640387819113187553719242",
+      "question": "Will Kyle Schwarber hit the most home runs during the 2026 MLB regular season?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Kyle Schwarber",
+        "themes": [
+          "MLB",
+          "Home runs",
+          "baseball",
+          "Sports",
+          "Rewards 50, 4.5, 20"
+        ],
+        "geography": null,
+        "resolution_source": "unknown",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "2036565",
+      "condition_id": "0x11e4689bacf621bca290111711b27a208420e1abaddef5fb1aeacef54ac02a7b",
+      "token_id": "92007005708272854352261830447211386336881171882243486035653149879317910606853",
+      "question": "Will Kyle Schwarber hit the most home runs during the 2026 MLB regular season?",
+      "net_shares": 20.0,
+      "avg_price": 0.48,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Kyle Schwarber",
+        "themes": [
+          "MLB",
+          "Home runs",
+          "baseball",
+          "Sports",
+          "Rewards 50, 4.5, 20"
+        ],
+        "geography": null,
+        "resolution_source": "unknown",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": 0.405
+    },
+    {
+      "market_id": "3344293",
+      "condition_id": "0xc56d98be031434de5fe34f25d2161cdf1f9551a6f10d4c39e59171fa169d4d3e",
+      "token_id": "50570984845466338289154663542101528279642780826894702969094378475734891107215",
+      "question": "Will \"Wildchild\" - Alex Warren first week album sales be between 50k and 70k?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "50-70k",
+        "themes": [
+          "song",
+          "Music",
+          "album",
+          "Culture",
+          "spotify",
+          "billboard",
+          "Celebrities"
+        ],
+        "geography": null,
+        "resolution_source": "hitsdailydouble.com",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3344293",
+      "condition_id": "0xc56d98be031434de5fe34f25d2161cdf1f9551a6f10d4c39e59171fa169d4d3e",
+      "token_id": "61646956882169289028804193165095028847418658633786598926610718156507372653837",
+      "question": "Will \"Wildchild\" - Alex Warren first week album sales be between 50k and 70k?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "50-70k",
+        "themes": [
+          "song",
+          "Music",
+          "album",
+          "Culture",
+          "spotify",
+          "billboard",
+          "Celebrities"
+        ],
+        "geography": null,
+        "resolution_source": "hitsdailydouble.com",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "2491913",
+      "condition_id": "0x74f522aaf8ae1b6bbf1cbaca3d6ee5f525334d6a0ece415384c022507f4df21b",
+      "token_id": "96546191245698015702072322110162164634942129164748792113006489042137462161934",
+      "question": "Will Trump not endorse a Party in the 2026 Israeli Election?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "No Endorsement",
+        "themes": [
+          "election",
+          "Israel",
+          "Trump",
+          "endorsements",
+          "Israel Election"
+        ],
+        "geography": "Israel",
+        "resolution_source": "unknown",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "2491913",
+      "condition_id": "0x74f522aaf8ae1b6bbf1cbaca3d6ee5f525334d6a0ece415384c022507f4df21b",
+      "token_id": "74178441096493189963030026110268948997314446029185654281086677015031553430730",
+      "question": "Will Trump not endorse a Party in the 2026 Israeli Election?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "No Endorsement",
+        "themes": [
+          "election",
+          "Israel",
+          "Trump",
+          "endorsements",
+          "Israel Election"
+        ],
+        "geography": "Israel",
+        "resolution_source": "unknown",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3072292",
+      "condition_id": "0x7f2eb362637d5067ac88c4ee7281772b23b6fea99cea1efa019bbc6d0c1e4e6e",
+      "token_id": "74696841273305790671697690262842613773461087174283674071929573450497841114090",
+      "question": "Will the highest score achieved on Humanity\u2019s Last Exam in 2026 be 65% or higher?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "65%+",
+        "themes": [
+          "AI",
+          "Tech",
+          "AI Benchmarks"
+        ],
+        "geography": null,
+        "resolution_source": "agi.safe.ai",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3072292",
+      "condition_id": "0x7f2eb362637d5067ac88c4ee7281772b23b6fea99cea1efa019bbc6d0c1e4e6e",
+      "token_id": "25001243555839357955366135281967071271176015957955851557054931335861130998733",
+      "question": "Will the highest score achieved on Humanity\u2019s Last Exam in 2026 be 65% or higher?",
+      "net_shares": 40.0,
+      "avg_price": 0.72,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "65%+",
+        "themes": [
+          "AI",
+          "Tech",
+          "AI Benchmarks"
+        ],
+        "geography": null,
+        "resolution_source": "agi.safe.ai",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": 0.72
+    },
+    {
+      "market_id": "3072331",
+      "condition_id": "0x97f8b62d7011ab06f3a376235d696106b9ffa0b2a7ae6b303a6ddc0aa3d8701f",
+      "token_id": "21017494660016865152500751943930281918229945188485381363967741191934675869485",
+      "question": "Will the highest score achieved by a Meta model on Humanity\u2019s Last Exam in 2026 be 60% or higher?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "60%+",
+        "themes": [
+          "AI",
+          "Meta",
+          "Tech",
+          "AI Benchmarks"
+        ],
+        "geography": null,
+        "resolution_source": "agi.safe.ai",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3072331",
+      "condition_id": "0x97f8b62d7011ab06f3a376235d696106b9ffa0b2a7ae6b303a6ddc0aa3d8701f",
+      "token_id": "51423249645665948588246080686243200036731795470735332570099412729439403504562",
+      "question": "Will the highest score achieved by a Meta model on Humanity\u2019s Last Exam in 2026 be 60% or higher?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "60%+",
+        "themes": [
+          "AI",
+          "Meta",
+          "Tech",
+          "AI Benchmarks"
+        ],
+        "geography": null,
+        "resolution_source": "agi.safe.ai",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "2089111",
+      "condition_id": "0x927d2b026c8cbd96e5a9cb7a3f2457bc06725d145f4913c1931d8cbf8464aee7",
+      "token_id": "105484939946786732629358238535517573537022130860998447943263640174281414340108",
+      "question": "Will Ciro Gomes win the 2026 Cear\u00e1 gubernatorial election?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Ciro Gomes",
+        "themes": [
+          "Global Elections",
+          "Brazil",
+          "Main Election",
+          "Politics",
+          "Elections"
+        ],
+        "geography": "Brazil",
+        "resolution_source": "unknown",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "2089111",
+      "condition_id": "0x927d2b026c8cbd96e5a9cb7a3f2457bc06725d145f4913c1931d8cbf8464aee7",
+      "token_id": "6420041504394787020962944132154760366808172886037862610912845165905940455037",
+      "question": "Will Ciro Gomes win the 2026 Cear\u00e1 gubernatorial election?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Ciro Gomes",
+        "themes": [
+          "Global Elections",
+          "Brazil",
+          "Main Election",
+          "Politics",
+          "Elections"
+        ],
+        "geography": "Brazil",
+        "resolution_source": "unknown",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3072320",
+      "condition_id": "0x7bbdd1da7d072e8edb1358702b4e629c3c154dfc9c1e4f433e283a46bc994779",
+      "token_id": "71753375926780946732248732570091389893959052154449628568357738182707915095375",
+      "question": "Will the highest score achieved by a SpaceXAI Grok model on Humanity\u2019s Last Exam in 2026 be 55% or higher?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "55%+",
+        "themes": [
+          "AI",
+          "Tech",
+          "SpaceXAI",
+          "AI Benchmarks"
+        ],
+        "geography": null,
+        "resolution_source": "agi.safe.ai",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3072320",
+      "condition_id": "0x7bbdd1da7d072e8edb1358702b4e629c3c154dfc9c1e4f433e283a46bc994779",
+      "token_id": "1347434368301380786216247046027463505607813014023736122052144539645642668712",
+      "question": "Will the highest score achieved by a SpaceXAI Grok model on Humanity\u2019s Last Exam in 2026 be 55% or higher?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "55%+",
+        "themes": [
+          "AI",
+          "Tech",
+          "SpaceXAI",
+          "AI Benchmarks"
+        ],
+        "geography": null,
+        "resolution_source": "agi.safe.ai",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "2646914",
+      "condition_id": "0xc4ebab9f2830f6df67ab1b98615d5a9be8eebd106fd0f37e9a25e4a4edcc427c",
+      "token_id": "10618696958805388450273982806566275602086720395274264354492776873006123003601",
+      "question": "Will no qualifying diplomatic US-Iran meeting occur by September 30, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "No Meeting by September 30",
+        "themes": [
+          "Peace Deal",
+          "Iran",
+          "Trump",
+          "Nuclear",
+          "Geopolitics",
+          "US-Iran",
+          "Israel x Iran",
+          "Khamenei",
+          "Iran Ceasefire",
+          "Vance",
+          "Politics",
+          "U.S. x Iran",
+          "nuclear deal"
+        ],
+        "geography": "Iran",
+        "resolution_source": "www.aljazeera.com",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "2646914",
+      "condition_id": "0xc4ebab9f2830f6df67ab1b98615d5a9be8eebd106fd0f37e9a25e4a4edcc427c",
+      "token_id": "101196087194368016189458797815389873667514776317865121691440084473605225222305",
+      "question": "Will no qualifying diplomatic US-Iran meeting occur by September 30, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "No Meeting by September 30",
+        "themes": [
+          "Peace Deal",
+          "Iran",
+          "Trump",
+          "Nuclear",
+          "Geopolitics",
+          "US-Iran",
+          "Israel x Iran",
+          "Khamenei",
+          "Iran Ceasefire",
+          "Vance",
+          "Politics",
+          "U.S. x Iran",
+          "nuclear deal"
+        ],
+        "geography": "Iran",
+        "resolution_source": "www.aljazeera.com",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3357932",
+      "condition_id": "0x602a86cd22d03294e14d7ed455b6e0e7861012d428f03c99ad03e58755e160f3",
+      "token_id": "33987540064432099425037188449192430869946185526237898462852605320974784817515",
+      "question": "Will Eugenio Segura V\u00e1zquez win the 2027 Quintana Roo Governor Election?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Eugenio Segura V\u00e1zquez",
+        "themes": [
+          "Mexico",
+          "Politics",
+          "Elections",
+          "Main Election",
+          "Global Elections"
+        ],
+        "geography": "Mexico",
+        "resolution_source": "unknown",
+        "date_bucket": "2027-06-01"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3357932",
+      "condition_id": "0x602a86cd22d03294e14d7ed455b6e0e7861012d428f03c99ad03e58755e160f3",
+      "token_id": "87376815316194134094936975055227716710809891109131778821007120013548039081309",
+      "question": "Will Eugenio Segura V\u00e1zquez win the 2027 Quintana Roo Governor Election?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Eugenio Segura V\u00e1zquez",
+        "themes": [
+          "Mexico",
+          "Politics",
+          "Elections",
+          "Main Election",
+          "Global Elections"
+        ],
+        "geography": "Mexico",
+        "resolution_source": "unknown",
+        "date_bucket": "2027-06-01"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3377353",
+      "condition_id": "0xf6498a32bc8d215c254251b271db327eea683b8804580b88d1544853b9fe5032",
+      "token_id": "89597655531530433138423269731684179266399316402878477493927466923100816390022",
+      "question": "Will Wildwood win Best Animated Feature Film at the 99th Academy Awards?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Wildwood",
+        "themes": [
+          "Awards",
+          "Movies",
+          "Oscars",
+          "Culture",
+          "Oscars 2027"
+        ],
+        "geography": null,
+        "resolution_source": "www.oscars.org",
+        "date_bucket": "2027-03-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3377353",
+      "condition_id": "0xf6498a32bc8d215c254251b271db327eea683b8804580b88d1544853b9fe5032",
+      "token_id": "36702604999375558685983028492754617166204042866738263919641365122904144211138",
+      "question": "Will Wildwood win Best Animated Feature Film at the 99th Academy Awards?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Wildwood",
+        "themes": [
+          "Awards",
+          "Movies",
+          "Oscars",
+          "Culture",
+          "Oscars 2027"
+        ],
+        "geography": null,
+        "resolution_source": "www.oscars.org",
+        "date_bucket": "2027-03-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3499790",
+      "condition_id": "0xc55e2bb43b89ecbdb1a9bcb0cde684e3f2108faf1d7502ca6032b260c9aed81f",
+      "token_id": "104266918293222855521793046357307821515714886346545207316467665058118412274070",
+      "question": "Reserve Bank of Australia increases interest rates by 25 bps at the November 2026 meeting?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "25 bps increase",
+        "themes": [
+          "World",
+          "Economy",
+          "Global Rates",
+          "Aus",
+          "RBA"
+        ],
+        "geography": "World",
+        "resolution_source": "www.rba.gov.au",
+        "date_bucket": "2026-11-03"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3499790",
+      "condition_id": "0xc55e2bb43b89ecbdb1a9bcb0cde684e3f2108faf1d7502ca6032b260c9aed81f",
+      "token_id": "85060150111866177952624671964550062315899025878231761291888147134512934130020",
+      "question": "Reserve Bank of Australia increases interest rates by 25 bps at the November 2026 meeting?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "25 bps increase",
+        "themes": [
+          "World",
+          "Economy",
+          "Global Rates",
+          "Aus",
+          "RBA"
+        ],
+        "geography": "World",
+        "resolution_source": "www.rba.gov.au",
+        "date_bucket": "2026-11-03"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3358720",
+      "condition_id": "0xf9d0065a787c87164795c89f9de0b6fd832bc60b2bf7dcf663ac54a7be4802b4",
+      "token_id": "77027397980391277397513522355031604533890151363282815925834459907404127741788",
+      "question": "Will Trump endorse Fl\u00e1vio Bolsonaro for President of Brazil?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Fl\u00e1vio Bolsonaro",
+        "themes": [
+          "Trump",
+          "Politics",
+          "Elections",
+          "endorsements",
+          "Global Elections",
+          "International Election Props",
+          "Brazil"
+        ],
+        "geography": "Brazil",
+        "resolution_source": "unknown",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3358720",
+      "condition_id": "0xf9d0065a787c87164795c89f9de0b6fd832bc60b2bf7dcf663ac54a7be4802b4",
+      "token_id": "29913492815808282576776171315007557911668296216900429010305152484443932266049",
+      "question": "Will Trump endorse Fl\u00e1vio Bolsonaro for President of Brazil?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Fl\u00e1vio Bolsonaro",
+        "themes": [
+          "Trump",
+          "Politics",
+          "Elections",
+          "endorsements",
+          "Global Elections",
+          "International Election Props",
+          "Brazil"
+        ],
+        "geography": "Brazil",
+        "resolution_source": "unknown",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3930564",
+      "condition_id": "0x9b01dd8a8ec67253725f3e469ea56973e8fd1d4e728477bafec631790369a7d4",
+      "token_id": "6627012413385605959206717282415751450674901347833413963718018760725444066002",
+      "question": "Will the PLQ win 28-31 seats in the National Assembly of Quebec in this election?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "28-31",
+        "themes": [
+          "World",
+          "Canada",
+          "Elections",
+          "Main Election",
+          "World Elections",
+          "Global Elections",
+          "Politics"
+        ],
+        "geography": "World",
+        "resolution_source": "www.electionsquebec.qc.ca",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3930564",
+      "condition_id": "0x9b01dd8a8ec67253725f3e469ea56973e8fd1d4e728477bafec631790369a7d4",
+      "token_id": "91171005803482608591264533269026821860763983668833914045624311396989427224020",
+      "question": "Will the PLQ win 28-31 seats in the National Assembly of Quebec in this election?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "28-31",
+        "themes": [
+          "World",
+          "Canada",
+          "Elections",
+          "Main Election",
+          "World Elections",
+          "Global Elections",
+          "Politics"
+        ],
+        "geography": "World",
+        "resolution_source": "www.electionsquebec.qc.ca",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3938030",
+      "condition_id": "0xce2bc52d51f7dc4dbeec12992fc0252812d6be4c1ad6d89ff55ad7b2c58f4034",
+      "token_id": "39974663064472168142113182651250037199976284169587173965599958826457648663403",
+      "question": "Will Core PCE YoY be 3.2% in August?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "3.2%",
+        "themes": [
+          "PCE",
+          "Core PCE",
+          "Inflation",
+          "Macro Indicators",
+          "Economy"
+        ],
+        "geography": null,
+        "resolution_source": "www.bea.gov",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3938030",
+      "condition_id": "0xce2bc52d51f7dc4dbeec12992fc0252812d6be4c1ad6d89ff55ad7b2c58f4034",
+      "token_id": "71483851674934707028450125443238592933994700449438871374267653834197298794519",
+      "question": "Will Core PCE YoY be 3.2% in August?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "3.2%",
+        "themes": [
+          "PCE",
+          "Core PCE",
+          "Inflation",
+          "Macro Indicators",
+          "Economy"
+        ],
+        "geography": null,
+        "resolution_source": "www.bea.gov",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "1123359",
+      "condition_id": "0x95b01f1ddbf8c89f007425d3f78d65ab2d8ac4c355eb7e2b7752dedf1f214105",
+      "token_id": "107593745130639131117879088978522276178202216447775798463548111992845416662727",
+      "question": "Will the UK\u2019s 2026 inflation be between 3.5% and 3.9%?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "3.5\u20133.9%",
+        "themes": [
+          "Macro Indicators",
+          "CPI",
+          "UK",
+          "Economy",
+          "Inflation"
+        ],
+        "geography": null,
+        "resolution_source": "www.ons.gov.uk",
+        "date_bucket": "2027-01-02"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "1123359",
+      "condition_id": "0x95b01f1ddbf8c89f007425d3f78d65ab2d8ac4c355eb7e2b7752dedf1f214105",
+      "token_id": "57537127076438147295115881439617970081648547756751098069248179445417990086209",
+      "question": "Will the UK\u2019s 2026 inflation be between 3.5% and 3.9%?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "3.5\u20133.9%",
+        "themes": [
+          "Macro Indicators",
+          "CPI",
+          "UK",
+          "Economy",
+          "Inflation"
+        ],
+        "geography": null,
+        "resolution_source": "www.ons.gov.uk",
+        "date_bucket": "2027-01-02"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3954343",
+      "condition_id": "0x29465c9812b2eef7aee8bbb4af590595d87049868acbe8ccf3e354faf9e70cf6",
+      "token_id": "7430927207119859717448422604218470104532558655553578048452394954885232677914",
+      "question": "Will WTI Crude Oil (WTI) hit (HIGH) $95 in September?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "\u2191 $95",
+        "themes": [
+          "Pyth Finance",
+          "Commodities",
+          "Oil",
+          "Finance",
+          "Monthly",
+          "Hit Price",
+          "Hide From New",
+          "Finance Updown"
+        ],
+        "geography": null,
+        "resolution_source": "pythdata.app",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3954343",
+      "condition_id": "0x29465c9812b2eef7aee8bbb4af590595d87049868acbe8ccf3e354faf9e70cf6",
+      "token_id": "36364810323821935744945961982560586110401440589045274605668218991225890456385",
+      "question": "Will WTI Crude Oil (WTI) hit (HIGH) $95 in September?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "\u2191 $95",
+        "themes": [
+          "Pyth Finance",
+          "Commodities",
+          "Oil",
+          "Finance",
+          "Monthly",
+          "Hit Price",
+          "Hide From New",
+          "Finance Updown"
+        ],
+        "geography": null,
+        "resolution_source": "pythdata.app",
+        "date_bucket": "2026-09-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3072318",
+      "condition_id": "0xeb5d918348e57c731bc6899c18f0476cba775332fcdb8ee53f23a372e777db19",
+      "token_id": "71970265423171613408428666644865836185052293713391876091332849893886357291521",
+      "question": "Will the highest score achieved by a SpaceXAI Grok model on Humanity\u2019s Last Exam in 2026 be 45% or higher?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "45%+",
+        "themes": [
+          "AI",
+          "Tech",
+          "SpaceXAI",
+          "AI Benchmarks"
+        ],
+        "geography": null,
+        "resolution_source": "agi.safe.ai",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.001,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3072318",
+      "condition_id": "0xeb5d918348e57c731bc6899c18f0476cba775332fcdb8ee53f23a372e777db19",
+      "token_id": "73333197648465377670231650164225506221996804906315454617016904271728295536896",
+      "question": "Will the highest score achieved by a SpaceXAI Grok model on Humanity\u2019s Last Exam in 2026 be 45% or higher?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "45%+",
+        "themes": [
+          "AI",
+          "Tech",
+          "SpaceXAI",
+          "AI Benchmarks"
+        ],
+        "geography": null,
+        "resolution_source": "agi.safe.ai",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.001,
+      "neg_risk": false,
+      "mark_price": null
+    },
+    {
+      "market_id": "3357935",
+      "condition_id": "0xd5c52b1b496e702c7c5a1f261aa1664f5c79f502c5006f771158e8492df60b7c",
+      "token_id": "9677514585416994107484262587196067949878168750358267421197100713851796061235",
+      "question": "Will Rafael Mar\u00edn Mollinedo win the 2027 Quintana Roo Governor Election?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Rafael Mar\u00edn Mollinedo",
+        "themes": [
+          "Mexico",
+          "Politics",
+          "Elections",
+          "Main Election",
+          "Global Elections"
+        ],
+        "geography": "Mexico",
+        "resolution_source": "unknown",
+        "date_bucket": "2027-06-01"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3357935",
+      "condition_id": "0xd5c52b1b496e702c7c5a1f261aa1664f5c79f502c5006f771158e8492df60b7c",
+      "token_id": "10217300666845085768718195977066910241246064654750908543052187388185821868880",
+      "question": "Will Rafael Mar\u00edn Mollinedo win the 2027 Quintana Roo Governor Election?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Rafael Mar\u00edn Mollinedo",
+        "themes": [
+          "Mexico",
+          "Politics",
+          "Elections",
+          "Main Election",
+          "Global Elections"
+        ],
+        "geography": "Mexico",
+        "resolution_source": "unknown",
+        "date_bucket": "2027-06-01"
+      },
+      "tick_size": 0.001,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3685385",
+      "condition_id": "0xb3191751ba756172e31ca760cf4b2a9a4324b0993d61f84433f5da7e0f94d64b",
+      "token_id": "41613658196723695449189833265179592193122678915806434059994038196882828529689",
+      "question": "Will there be no next Google Gemini Pro model release by November 1, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "No release by November 1",
+        "themes": [
+          "AI",
+          "Tech",
+          "Gemini",
+          "google",
+          "Gemini Pro",
+          "AI Releases"
+        ],
+        "geography": null,
+        "resolution_source": "unknown",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3685385",
+      "condition_id": "0xb3191751ba756172e31ca760cf4b2a9a4324b0993d61f84433f5da7e0f94d64b",
+      "token_id": "15537468557576571719888630287255694159975391584949794870288041067460092451334",
+      "question": "Will there be no next Google Gemini Pro model release by November 1, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "No release by November 1",
+        "themes": [
+          "AI",
+          "Tech",
+          "Gemini",
+          "google",
+          "Gemini Pro",
+          "AI Releases"
+        ],
+        "geography": null,
+        "resolution_source": "unknown",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "2822675",
+      "condition_id": "0xecaa476d11ac4a93b00fa2f010df31a6a450bbe91691e24b6be23e888bb91e44",
+      "token_id": "41292692490316935396749034672551065143117671074111393406550546598596662082135",
+      "question": "Will AfD win the most seats in 2 German state elections in September 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "2",
+        "themes": [
+          "Europe",
+          "German Politics",
+          "Germany",
+          "Politics",
+          "Elections",
+          "deprec German Election",
+          "German Elections"
+        ],
+        "geography": "Germany",
+        "resolution_source": "unknown",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "2822675",
+      "condition_id": "0xecaa476d11ac4a93b00fa2f010df31a6a450bbe91691e24b6be23e888bb91e44",
+      "token_id": "76685648989792886631767112195182266241615531946858553580553047377214672204510",
+      "question": "Will AfD win the most seats in 2 German state elections in September 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "2",
+        "themes": [
+          "Europe",
+          "German Politics",
+          "Germany",
+          "Politics",
+          "Elections",
+          "deprec German Election",
+          "German Elections"
+        ],
+        "geography": "Germany",
+        "resolution_source": "unknown",
+        "date_bucket": "2026-12-03"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3765286",
+      "condition_id": "0xe4062b830234373d96799cfdffc10edb2a4fa4a05c15d18ce69c39be1e758646",
+      "token_id": "106252137878036675632524571912055518607203218511456137740837392069531747152908",
+      "question": "Will Mohammed Abdullahi Abubakar win the 2027 Bauchi State gubernatorial election?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Mohammed Abdullahi Abubakar",
+        "themes": [
+          "Main Election",
+          "Global Elections",
+          "africa",
+          "Nigeria",
+          "Politics",
+          "Nigerian Governor Election",
+          "Elections",
+          "Nigerian Election"
+        ],
+        "geography": null,
+        "resolution_source": "unknown",
+        "date_bucket": "2027-02-01"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3765286",
+      "condition_id": "0xe4062b830234373d96799cfdffc10edb2a4fa4a05c15d18ce69c39be1e758646",
+      "token_id": "37088285404101951384528876551181895458460045659482306971908376588069606052172",
+      "question": "Will Mohammed Abdullahi Abubakar win the 2027 Bauchi State gubernatorial election?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "Mohammed Abdullahi Abubakar",
+        "themes": [
+          "Main Election",
+          "Global Elections",
+          "africa",
+          "Nigeria",
+          "Politics",
+          "Nigerian Governor Election",
+          "Elections",
+          "Nigerian Election"
+        ],
+        "geography": null,
+        "resolution_source": "unknown",
+        "date_bucket": "2027-02-01"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3529046",
+      "condition_id": "0x055eec9d6d2268970c04ae78e53e0c1beeee9addd37ba5b6371ad419d82882de",
+      "token_id": "65679780423991087556285562248209888448816722161936828664165933075063581530409",
+      "question": "Will the Ornn B200 Index be at least $6.50 on October 31, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "$6.50+",
+        "themes": [
+          "Compute",
+          "Business",
+          "AI",
+          "B200",
+          "Ornn",
+          "Tech",
+          "NVIDIA",
+          "Finance"
+        ],
+        "geography": null,
+        "resolution_source": "dashboard.ornnai.com",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    },
+    {
+      "market_id": "3529046",
+      "condition_id": "0x055eec9d6d2268970c04ae78e53e0c1beeee9addd37ba5b6371ad419d82882de",
+      "token_id": "61450818037873140989107346185435057035071477286625177261160911893184326705381",
+      "question": "Will the Ornn B200 Index be at least $6.50 on October 31, 2026?",
+      "net_shares": 0.0,
+      "avg_price": 0.0,
+      "realized_pnl_usd": 0.0,
+      "cluster_tags": {
+        "entity": "$6.50+",
+        "themes": [
+          "Compute",
+          "Business",
+          "AI",
+          "B200",
+          "Ornn",
+          "Tech",
+          "NVIDIA",
+          "Finance"
+        ],
+        "geography": null,
+        "resolution_source": "dashboard.ornnai.com",
+        "date_bucket": "2026-10-04"
+      },
+      "tick_size": 0.01,
+      "neg_risk": true,
+      "mark_price": null
+    }
+  ],
+  "open_orders": [],
+  "fills": [
+    {
+      "id": "95f67c37-d9ef-4932-97a8-363ccf1cc380",
+      "market_id": "2865352",
+      "condition_id": "0x73eb13f81fcbde08320465b211f5567bd211c026351a5eaf2d0215c982c87a44",
+      "token_id": "111515707184512171895531671555030031955716649561689309889439649383999463201878",
+      "question": "Will Betty Gilpin \u2013 \u201cWidow\u2019s Bay\u201d win Emmys 2026: Outstanding guest actress in a comedy series?",
+      "side": "buy",
+      "price": 0.712,
+      "size_shares": 20.0,
+      "collateral_usd": 14.239999999999998,
+      "order_id": "0xc1306cee682fb2c385a3810ff7eed822c85bf87ffe6a53b2e609637ffdb36b3f",
+      "filled_at": "2026-08-31T04:31:26.015695+00:00",
+      "mid_price_at_fill": 0.6635,
+      "fee_usd": 1.424,
+      "markout_5m_usd": -2.649999999999999,
+      "markout_30m_usd": -2.66
+    },
+    {
+      "id": "ee207d08-ecf6-4b7c-b843-284cb67823b8",
+      "market_id": "3953548",
+      "condition_id": "0x8def5f772cd6aba88f032d6a4087be552e9948eddd897baa0fccef5aebd952ba",
+      "token_id": "82429104850929084251783210169465013917103056684803347841657068623347991956596",
+      "question": "Israel x Lebanon diplomatic meeting by September 13, 2026?",
+      "side": "buy",
+      "price": 0.44,
+      "size_shares": 20.0,
+      "collateral_usd": 8.8,
+      "order_id": "0x8d19bf088bd9f000622771e5c1fccd10200af3731c0c0d3de80bd9281f28b08d",
+      "filled_at": "2026-08-31T04:31:26.444490+00:00",
+      "mid_price_at_fill": 0.45999999999999996,
+      "fee_usd": 0.0,
+      "markout_5m_usd": -0.5999999999999994,
+      "markout_30m_usd": 1.4000000000000001
+    },
+    {
+      "id": "077d9e17-54ff-49c5-9f08-b1077a7c8b8a",
+      "market_id": "3953548",
+      "condition_id": "0x8def5f772cd6aba88f032d6a4087be552e9948eddd897baa0fccef5aebd952ba",
+      "token_id": "45431785698259821622224770188969061251540295566137045288082575998913795773735",
+      "question": "Israel x Lebanon diplomatic meeting by September 13, 2026?",
+      "side": "buy",
+      "price": 0.49,
+      "size_shares": 20.0,
+      "collateral_usd": 9.8,
+      "order_id": "0x3d281ab1c1f6adf412e6a845dcfc469354ca1dcae9d318adb6ee8d00921d22d5",
+      "filled_at": "2026-08-31T05:00:40.950775+00:00",
+      "mid_price_at_fill": 0.49,
+      "fee_usd": 0.0,
+      "markout_5m_usd": -1.4999999999999991,
+      "markout_30m_usd": null
+    },
+    {
+      "id": "3cf0eaf6-2311-434e-b47d-8fdc5c0fd393",
+      "market_id": "2036565",
+      "condition_id": "0x11e4689bacf621bca290111711b27a208420e1abaddef5fb1aeacef54ac02a7b",
+      "token_id": "92007005708272854352261830447211386336881171882243486035653149879317910606853",
+      "question": "Will Kyle Schwarber hit the most home runs during the 2026 MLB regular season?",
+      "side": "buy",
+      "price": 0.48,
+      "size_shares": 20.0,
+      "collateral_usd": 9.6,
+      "order_id": "0xc2770126f5210815a7b17fe98ddb6a53f5277698cc107afd66278f4e5d4b9cad",
+      "filled_at": "2026-08-31T05:01:37.973262+00:00",
+      "mid_price_at_fill": 0.51,
+      "fee_usd": 0.96,
+      "markout_5m_usd": 0.10000000000000009,
+      "markout_30m_usd": null
+    },
+    {
+      "id": "3d0f6f79-2148-4272-be8c-c40c95433f3e",
+      "market_id": "3072292",
+      "condition_id": "0x7f2eb362637d5067ac88c4ee7281772b23b6fea99cea1efa019bbc6d0c1e4e6e",
+      "token_id": "25001243555839357955366135281967071271176015957955851557054931335861130998733",
+      "question": "Will the highest score achieved on Humanity\u2019s Last Exam in 2026 be 65% or higher?",
+      "side": "buy",
+      "price": 0.72,
+      "size_shares": 15.0,
+      "collateral_usd": 10.799999999999999,
+      "order_id": "0x2a3952b69cce944926e7a9edea144e769213b5398c3384c403090ec647a8d9d7",
+      "filled_at": "2026-08-31T05:01:38.340137+00:00",
+      "mid_price_at_fill": 0.745,
+      "fee_usd": 1.0799999999999998,
+      "markout_5m_usd": -1.200000000000001,
+      "markout_30m_usd": null
+    },
+    {
+      "id": "51dc70c6-48d0-49b9-ae0b-8f187ae48a80",
+      "market_id": "3953548",
+      "condition_id": "0x8def5f772cd6aba88f032d6a4087be552e9948eddd897baa0fccef5aebd952ba",
+      "token_id": "45431785698259821622224770188969061251540295566137045288082575998913795773735",
+      "question": "Israel x Lebanon diplomatic meeting by September 13, 2026?",
+      "side": "buy",
+      "price": 0.45,
+      "size_shares": 20.0,
+      "collateral_usd": 9.0,
+      "order_id": "0x25a67fb92e8f1e203a4955c1228338767da97981b8fb372cc2c458acf689b1c3",
+      "filled_at": "2026-08-31T05:05:32.224746+00:00",
+      "mid_price_at_fill": 0.41500000000000004,
+      "fee_usd": 0.0,
+      "markout_5m_usd": 0.30000000000000027,
+      "markout_30m_usd": null
+    },
+    {
+      "id": "79e6be9d-1b8e-4704-9e90-10a9d92e25dd",
+      "market_id": "3953548",
+      "condition_id": "0x8def5f772cd6aba88f032d6a4087be552e9948eddd897baa0fccef5aebd952ba",
+      "token_id": "45431785698259821622224770188969061251540295566137045288082575998913795773735",
+      "question": "Israel x Lebanon diplomatic meeting by September 13, 2026?",
+      "side": "buy",
+      "price": 0.45,
+      "size_shares": 20.0,
+      "collateral_usd": 9.0,
+      "order_id": "0x25a67fb92e8f1e203a4955c1228338767da97981b8fb372cc2c458acf689b1c3",
+      "filled_at": "2026-08-31T05:10:15.850433+00:00",
+      "mid_price_at_fill": 0.465,
+      "fee_usd": 0.0,
+      "markout_5m_usd": -0.8999999999999997,
+      "markout_30m_usd": null
+    },
+    {
+      "id": "d3f593f0-78b2-410a-ab8f-e3cd0284bd98",
+      "market_id": "3072292",
+      "condition_id": "0x7f2eb362637d5067ac88c4ee7281772b23b6fea99cea1efa019bbc6d0c1e4e6e",
+      "token_id": "25001243555839357955366135281967071271176015957955851557054931335861130998733",
+      "question": "Will the highest score achieved on Humanity\u2019s Last Exam in 2026 be 65% or higher?",
+      "side": "buy",
+      "price": 0.72,
+      "size_shares": 25.0,
+      "collateral_usd": 18.0,
+      "order_id": "0x2a3952b69cce944926e7a9edea144e769213b5398c3384c403090ec647a8d9d7",
+      "filled_at": "2026-08-31T05:10:16.216698+00:00",
+      "mid_price_at_fill": 0.645,
+      "fee_usd": 1.7999999999999998,
+      "markout_5m_usd": -1.9999999999999991,
+      "markout_30m_usd": null
+    },
+    {
+      "id": "6ebb8095-dfd2-4e1a-a6ec-eefdc3d818f7",
+      "market_id": "3953548",
+      "condition_id": "0x8def5f772cd6aba88f032d6a4087be552e9948eddd897baa0fccef5aebd952ba",
+      "token_id": "45431785698259821622224770188969061251540295566137045288082575998913795773735",
+      "question": "Israel x Lebanon diplomatic meeting by September 13, 2026?",
+      "side": "buy",
+      "price": 0.45,
+      "size_shares": 20.0,
+      "collateral_usd": 9.0,
+      "order_id": "0x25a67fb92e8f1e203a4955c1228338767da97981b8fb372cc2c458acf689b1c3",
+      "filled_at": "2026-08-31T05:14:15.908445+00:00",
+      "mid_price_at_fill": 0.405,
+      "fee_usd": 0.0,
+      "markout_5m_usd": -0.8999999999999997,
+      "markout_30m_usd": null
+    },
+    {
+      "id": "435835ab-87b7-4a4f-bd2c-4ff110f25cbf",
+      "market_id": "3072292",
+      "condition_id": "0x7f2eb362637d5067ac88c4ee7281772b23b6fea99cea1efa019bbc6d0c1e4e6e",
+      "token_id": "25001243555839357955366135281967071271176015957955851557054931335861130998733",
+      "question": "Will the highest score achieved on Humanity\u2019s Last Exam in 2026 be 65% or higher?",
+      "side": "buy",
+      "price": 0.72,
+      "size_shares": 25.0,
+      "collateral_usd": 18.0,
+      "order_id": "0x2a3952b69cce944926e7a9edea144e769213b5398c3384c403090ec647a8d9d7",
+      "filled_at": "2026-08-31T05:14:16.273490+00:00",
+      "mid_price_at_fill": 0.64,
+      "fee_usd": 1.7999999999999998,
+      "markout_5m_usd": -1.9999999999999991,
+      "markout_30m_usd": null
+    },
+    {
+      "id": "c10ae0a9-73ca-46ab-bf36-0793ad4ec265",
+      "market_id": "3953548",
+      "condition_id": "0x8def5f772cd6aba88f032d6a4087be552e9948eddd897baa0fccef5aebd952ba",
+      "token_id": "45431785698259821622224770188969061251540295566137045288082575998913795773735",
+      "question": "Israel x Lebanon diplomatic meeting by September 13, 2026?",
+      "side": "buy",
+      "price": 0.45,
+      "size_shares": 20.0,
+      "collateral_usd": 9.0,
+      "order_id": "0x25a67fb92e8f1e203a4955c1228338767da97981b8fb372cc2c458acf689b1c3",
+      "filled_at": "2026-08-31T05:18:10.422848+00:00",
+      "mid_price_at_fill": 0.405,
+      "fee_usd": 0.0,
+      "markout_5m_usd": -0.8999999999999997,
+      "markout_30m_usd": null
+    },
+    {
+      "id": "a9dc6429-a46c-4680-9678-54c0b8eaa4e3",
+      "market_id": "3072292",
+      "condition_id": "0x7f2eb362637d5067ac88c4ee7281772b23b6fea99cea1efa019bbc6d0c1e4e6e",
+      "token_id": "25001243555839357955366135281967071271176015957955851557054931335861130998733",
+      "question": "Will the highest score achieved on Humanity\u2019s Last Exam in 2026 be 65% or higher?",
+      "side": "buy",
+      "price": 0.72,
+      "size_shares": 25.0,
+      "collateral_usd": 18.0,
+      "order_id": "0x2a3952b69cce944926e7a9edea144e769213b5398c3384c403090ec647a8d9d7",
+      "filled_at": "2026-08-31T05:19:45.480083+00:00",
+      "mid_price_at_fill": 0.64,
+      "fee_usd": 1.7999999999999998,
+      "markout_5m_usd": null,
+      "markout_30m_usd": null
+    }
+  ],
+  "reward_payouts": [],
+  "realized_reward_usd_total": 0.0,
+  "realized_fee_usd_total": 8.863999999999999,
+  "halted": false,
+  "halt_reasons": [
+    "adverse selection kill switch: last 5 scored fills all marked out worse than 2.0c/share at 5m"
+  ],
+  "created_at": "2026-08-24T09:12:07.101523+00:00",
+  "updated_at": "2026-08-31T13:49:53.518987+00:00",
+  "last_reconciled_at": "2026-08-31T13:44:20.559527+00:00",
+  "n_ticks": 12207,
+  "one_sided_ticks": {
+    "2865352": 14,
+    "3953548": 29,
+    "2036565": 29,
+    "3072292": 19
+  },
+  "paused_markets": {
+    "3953548": "market pause: last 2 scored fills in 3953548 all marked out worse than 2.0c/share at 5m",
+    "3072292": "market pause: last 2 scored fills in 3072292 all marked out worse than 2.0c/share at 5m"
+  },
+  "kill_switch_ack_scored_fills": 11
+}

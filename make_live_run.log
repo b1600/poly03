@@ -1,0 +1,154 @@
+resuming Book M live state from making_live_state.json: 12205 ticks, equity=$491.10
+ticking every 45s, universe refreshed every 1800s [LIVE -- real orders will be placed]. Ctrl+C to stop.
+
+universe scan: 175 quotable market(s)
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3499789 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3499789 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3358720 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3358720 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 2036565 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3765286 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3765286 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 2865352 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3344294 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3344294 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3961591 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3961591 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3961680 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3961680 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3954346 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3954346 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3961241 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3961241 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3344132 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3344132 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 1123359 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 1123359 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 4018361 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 4018361 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 1721586 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 1721586 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 2361932 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 2361932 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3866124 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3866124 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 2646919 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 2646919 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3949523 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3949523 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3553897 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3553897 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3553884 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3553884 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3502550 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3502550 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3553895 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3553895 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3553883 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3553883 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3685220 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3685220 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3667936 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3667936 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3961590 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3961590 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3961663 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3961663 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3697418 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3697418 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 608368 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 608368 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3721709 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3721709 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3952991 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3952991 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 2822675 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 2822675 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 682708 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 682708 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 2491913 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 2491913 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 1301184 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 1301184 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 2000377 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 2000377 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3072320 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+ERROR:py_clob_client_v2.http_helpers.helpers:[py_clob_client_v2] request error status=503 url=https://clob.polymarket.com/order body={"error":"trading is disabled"}
+WARNING:poly03.making.execution:place failed for 3072320 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+[LIVE] [2026-08-31T10:07:32.264238+00:00] quotable=175 placed=0 cancelled=0 flattened=0 new_fills=0 equity=$491.10 ERRORS=72
+  error: place failed for 3499789 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+  error: place failed for 3499789 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+  error: place failed for 3358720 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+  error: place failed for 3358720 ask: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]
+  error: place failed for 2036565 bid: PolyApiException[status_code=503, error_message={'error': 'trading is disabled'}]

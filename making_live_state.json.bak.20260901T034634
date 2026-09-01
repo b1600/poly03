@@ -1,0 +1,22 @@
+{
+  "bankroll_cap_usd": 500.0,
+  "cash_usd": 477.7696,
+  "positions": [],
+  "open_orders": [],
+  "fills": [],
+  "reward_payouts": [],
+  "realized_reward_usd_total": 0.0,
+  "realized_fee_usd_total": 0.0,
+  "halted": false,
+  "halt_reasons": [],
+  "created_at": "2026-08-31T15:00:22.809311+00:00",
+  "updated_at": "2026-09-01T03:13:32.455009+00:00",
+  "last_reconciled_at": "2026-09-01T03:13:15.264652+00:00",
+  "n_ticks": 5,
+  "one_sided_ticks": {},
+  "paused_markets": {},
+  "kill_switch_ack_scored_fills": 0,
+  "booked_matched": {},
+  "trades_booked_through": null,
+  "earned_rewards_by_day": {}
+}
