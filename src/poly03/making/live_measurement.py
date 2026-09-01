@@ -194,7 +194,10 @@ def adverse_selection_summary(state: LiveMakingState) -> AdverseSelectionSummary
         n_scored=n_scored,
         spread_capture_usd=spread_capture,
         adverse_selection_usd=adverse,
-        reward_usd=state.realized_reward_usd_total,
+        # Earned, not paid: an epoch is reported days before it settles, and
+        # the gate is asking whether the strategy's economics work, not
+        # whether the money has cleared yet.
+        reward_usd=state.earned_reward_usd_total,
         fee_usd=state.realized_fee_usd_total,
         n_trade_confirmed=sum(1 for f in state.fills if f.source == "trades"),
     )

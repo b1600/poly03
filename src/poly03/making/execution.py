@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from poly03.classifier.llm_veto import LLMClassifierVeto, NoOpVeto
 from poly03.cluster.tagging import ClusterExposureTracker, ensure_event_tags, tag_market
@@ -616,6 +616,52 @@ def reconcile_trades(
             for order in state.open_orders:
                 if order.order_id == order_id:
                     order.size_matched = max(order.size_matched, cumulative)
+
+
+# Which UTC days `reconcile_rewards` re-reads each time it runs. Today's epoch
+# is still accumulating, and yesterday's can be finalised after midnight, so
+# both are re-read until they stop changing; `record_earned_rewards` assigns
+# rather than accumulates, so re-reading is free of double-counting.
+_REWARD_DAYS_TO_REFRESH = 2
+
+
+def reconcile_rewards(state: LiveMakingState, clob: ClobClient, report: LiveTickReport) -> None:
+    """Book the liquidity rewards the exchange says we earned.
+
+    Rewards are the only positive term in Book M's thesis -- the book pays
+    adverse selection on every fill and captures almost no spread (§4), so
+    whether it works at all is entirely a question of whether rewards exceed
+    that cost. They went unmeasured for the whole of Phase 1 because the
+    archived py-clob-client had no endpoint for them, which left the
+    strategy's central question unanswerable and let a losing configuration
+    look merely unproven.
+
+    (2026-08-31, the first day this was ever measured: $2.88 earned against
+    $8.85 of adverse selection on real fills -- rewards covering 33% of the
+    cost they exist to offset.)
+
+    Does not touch cash: an epoch is reported as earned before it settles, so
+    crediting it here would push `cash_usd` above the wallet. See
+    `LiveMakingState.record_reward_payout` for the money-actually-landed
+    path."""
+    today = datetime.now(timezone.utc).date()
+    for back in range(_REWARD_DAYS_TO_REFRESH):
+        day = (today - timedelta(days=back)).isoformat()
+        try:
+            rows = clob.get_earnings_for_day(day)
+        except Exception as exc:
+            report.error(f"reconcile_rewards: get_earnings_for_day({day}) failed: {exc}")
+            continue
+        total = 0.0
+        for row in rows:
+            try:
+                total += float(row.get("earnings") or 0.0)
+            except (TypeError, ValueError):
+                continue
+        # An empty day is a real answer (no rewards earned), not a missing
+        # one -- record it so the ledger can't keep a stale figure for a day
+        # the exchange has since revised down to zero.
+        state.record_earned_rewards(day, total)
 
 
 _MARKOUT_HORIZONS_MINUTES = (("markout_5m_usd", 5.0), ("markout_30m_usd", 30.0))
@@ -1217,6 +1263,7 @@ def run_live_tick(
         reconcile_trades(state, clob, report, decision_log_path=decision_log_path, token_to_market=token_to_market)
         reconcile_fills(state, clob, report, decision_log_path=decision_log_path, token_to_market=token_to_market)
         compute_markouts(state, clob, report)
+        reconcile_rewards(state, clob, report)
         _mark_to_market(state, clob, report)
         check_adverse_selection_kill_switch(state, report)
         check_market_pauses(state, report)

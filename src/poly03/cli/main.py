@@ -560,7 +560,11 @@ def cmd_make_live_status(args: argparse.Namespace) -> None:
     _log(f"deployed collateral: ${state.deployed_collateral_usd:,.2f}")
     _log(f"equity: ${state.equity_usd:,.2f}")
     _log(f"open positions: {len(state.open_positions)}  open orders: {len(state.open_orders)}  fills: {len(state.fills)}")
-    _log(f"realized reward: ${state.realized_reward_usd_total:,.2f} ({len(state.reward_payouts)} logged payouts)")
+    _log(
+        f"earned reward: ${state.earned_reward_usd_total:,.2f} "
+        f"({len(state.earned_rewards_by_day)} day(s) reconciled)"
+    )
+    _log(f"reward paid into cash: ${state.realized_reward_usd_total:,.2f} ({len(state.reward_payouts)} logged payouts)")
     _log(f"realized fee: ${state.realized_fee_usd_total:,.2f}")
     from_trades = sum(1 for f in state.fills if f.source == "trades")
     _log(f"fills confirmed by trade history: {from_trades}/{len(state.fills)}")
@@ -627,7 +631,9 @@ def cmd_make_live_report(args: argparse.Namespace, log=_log) -> None:
     )
     log(f"  spread capture (favorable markouts): ${adv.spread_capture_usd:,.2f}")
     log(f"  adverse selection (unfavorable markouts): ${adv.adverse_selection_usd:,.2f}")
-    log(f"  reward: ${adv.reward_usd:,.2f}   fees: ${adv.fee_usd:,.2f}")
+    log(f"  reward (earned): ${adv.reward_usd:,.2f}   fees: ${adv.fee_usd:,.2f}")
+    if adv.adverse_selection_usd > 0:
+        log(f"  reward / adverse selection: {adv.reward_usd / adv.adverse_selection_usd:.0%}")
     log(f"  capture (reward + spread capture - fees): ${adv.capture_usd:,.2f}")
     log(f"  net (capture - adverse selection): ${adv.net_usd:+,.2f}")
 

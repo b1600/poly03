@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from poly03.classifier.rules import Classification
 from poly03.classifier.taxonomy import Tier
 from poly03.data.models import OrderBook
@@ -17,6 +19,7 @@ from poly03.making.execution import (
     check_market_pauses,
     compute_markouts,
     reconcile_fills,
+    reconcile_rewards,
     reconcile_trades,
     run_live_tick,
 )
@@ -78,8 +81,11 @@ class FakeGamma:
 
 
 class FakeClob:
-    def __init__(self, sampling=(), books=None, conditional_balances=None, trades=()):
+    def __init__(self, sampling=(), books=None, conditional_balances=None, trades=(), earnings=None):
         self._sampling = list(sampling)
+        # {"YYYY-MM-DD": [{"condition_id": ..., "earnings": "1.5"}, ...]}
+        self.earnings = dict(earnings or {})
+        self.earnings_calls: list[str] = []
         self._books = books or {}
         self.posted: list[dict] = []
         self.cancelled: list[list[str]] = []
@@ -115,6 +121,10 @@ class FakeClob:
 
     def get_trades(self, *, after=None):
         return list(self.trades)
+
+    def get_earnings_for_day(self, date):
+        self.earnings_calls.append(date)
+        return list(self.earnings.get(date, []))
 
     def post_limit_order(self, *, token_id, price, size, side, tick_size, neg_risk):
         if self._post_side_effect is not None:
@@ -783,6 +793,9 @@ class _ReconcileClob:
     def get_fee_rate_bps(self, token_id):
         return None
 
+    def get_earnings_for_day(self, date):
+        return []
+
 
 def _remote_order(order_id="order-1", *, matched, size=20.0, price=0.45, status="LIVE"):
     return {
@@ -1380,3 +1393,97 @@ def test_the_floor_never_shortens_the_lookback_for_an_established_book(tmp_path,
     _reconcile_trades(state, clob, quotable, log_path=str(tmp_path / "d.jsonl"))
 
     assert len(state.fills) == 1
+
+
+# --- liquidity rewards: the one positive term, finally measured -------------
+
+
+def _earn(cond, amount):
+    return {"condition_id": cond, "earnings": str(amount), "maker_address": _FUNDER}
+
+
+def _reconcile_rewards(state, clob):
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+    reconcile_rewards(state, clob, report)
+    return report
+
+
+def test_rewards_are_summed_across_the_days_markets():
+    today = datetime.now(timezone.utc).date().isoformat()
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = FakeClob(earnings={today: [_earn("0xa", 0.32), _earn("0xb", 0.25), _earn("0xc", 0.001)]})
+
+    _reconcile_rewards(state, clob)
+
+    assert state.earned_rewards_by_day[today] == pytest.approx(0.571)
+    assert state.earned_reward_usd_total == pytest.approx(0.571)
+
+
+def test_rereading_a_growing_epoch_converges_instead_of_stacking():
+    """The current day's epoch is still accumulating, so it gets re-read every
+    tick. Accumulating rather than assigning would inflate rewards without
+    bound -- the same double-booking shape as the fill incident, on the one
+    number the strategy is judged by."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = FakeClob(earnings={today: [_earn("0xa", 1.0)]})
+
+    _reconcile_rewards(state, clob)
+    _reconcile_rewards(state, clob)
+    clob.earnings[today] = [_earn("0xa", 2.5)]  # epoch grew
+    _reconcile_rewards(state, clob)
+
+    assert state.earned_reward_usd_total == pytest.approx(2.5)
+
+
+def test_earned_rewards_never_move_cash():
+    """An epoch is reported as earned before it settles. Crediting it to cash
+    would push the book above the real wallet balance -- the drift class this
+    whole incident was about."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=480.65)
+    clob = FakeClob(earnings={today: [_earn("0xa", 2.88)]})
+
+    _reconcile_rewards(state, clob)
+
+    assert state.cash_usd == 480.65
+    assert state.realized_reward_usd_total == 0.0
+    assert state.earned_reward_usd_total == pytest.approx(2.88)
+
+
+def test_a_day_with_no_rewards_is_recorded_as_zero_not_skipped():
+    """Skipping empty days would let a stale figure survive after the
+    exchange revises a day down."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.record_earned_rewards(today, 5.0)
+
+    _reconcile_rewards(state, FakeClob(earnings={}))
+
+    assert state.earned_rewards_by_day[today] == 0.0
+
+
+def test_reward_fetch_failure_is_reported_not_fatal():
+    class Broken(FakeClob):
+        def get_earnings_for_day(self, date):
+            raise RuntimeError("rewards endpoint down")
+
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    report = _reconcile_rewards(state, Broken())
+
+    assert state.earned_rewards_by_day == {}
+    assert len(report.errors) == 2  # today + yesterday
+    assert all("reconcile_rewards" in e for e in report.errors)
+
+
+def test_run_live_tick_reconciles_rewards():
+    today = datetime.now(timezone.utc).date().isoformat()
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = FakeClob(earnings={today: [_earn("0xa", 1.25)]})
+
+    report = run_live_tick(
+        state, universe=UniverseReport(), gamma=FakeGamma(), clob=clob, max_markets_quoted=1, dry_run=False
+    )
+
+    assert state.earned_reward_usd_total == pytest.approx(1.25)
+    assert not [e for e in report.errors if "reconcile_rewards" in e]

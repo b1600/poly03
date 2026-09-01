@@ -215,6 +215,22 @@ class ClobClient:
 
         return self._client.get_trades(TradeParams(after=after))
 
+    def get_earnings_for_day(self, date: str) -> list[dict]:
+        """Per-market liquidity rewards this account earned on `date`
+        (YYYY-MM-DD, UTC). Each row carries `condition_id` and `earnings` in
+        USDC. Returns [] for a day with no rewards -- and for the current
+        day, returns the epoch so far, which grows until the day closes.
+
+        Rewards were long assumed unreconcilable (the old py-clob-client had
+        no such endpoint, and `LiveMakingState.record_reward_payout` exists
+        because of that). py-clob-client-v2 does expose it, which matters:
+        rewards are the only positive term in Book M's thesis, so leaving
+        them unmeasured left the strategy's central question unanswerable.
+        Measured at $2.88 for 2026-08-31 against $8.85 of adverse selection
+        -- the first hard read on whether the book can work."""
+        self._require_l2()
+        return self._client.get_earnings_for_user_for_day(date)
+
     @property
     def account_address(self) -> str | None:
         """The address our fills are attributed to in trade history --

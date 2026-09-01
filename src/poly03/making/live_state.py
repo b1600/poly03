@@ -8,13 +8,20 @@ populate this from the API each tick -- this module never assumes a fill
 happened, only records one once the CLOB confirms it (v1 §5.3: "trust
 reconciliation, not local assumptions").
 
-Reward payouts are the one thing here that's manually recorded rather than
-reconciled: Polymarket's liquidity rewards are paid out per epoch, not
-per-order, and no endpoint in py-clob-client surfaces a per-market realized
-payout to reconcile against. `record_reward_payout()` exists so an operator
-can log what actually landed (from the rewards dashboard or an on-chain
-transfer) against `making/rewards.py`'s Phase 0 estimate -- see §4's "check
-the reconstructed scoring ... against actual payouts."
+Rewards are tracked in two separate places on purpose, because "earned" and
+"paid" are different facts and conflating them is how cash drifts from the
+wallet:
+
+- `earned_rewards_by_day` is what the exchange says we earned, reconciled
+  from `ClobClient.get_earnings_for_day` (see `execution.reconcile_rewards`).
+  This is the measurement Book M's thesis turns on, and it does NOT touch
+  cash -- an epoch can be earned days before it settles.
+- `record_reward_payout()` is for USDC that actually landed, and does add to
+  cash, same as a fill would.
+
+The older comment here said rewards could not be reconciled at all. That was
+true of the archived py-clob-client and stopped being true at the v2
+migration; it left the one positive term in the strategy unmeasured.
 """
 
 from __future__ import annotations
@@ -205,6 +212,12 @@ class LiveMakingState:
     # floor (book the whole lookback), which is the right default for a state
     # that predates this field.
     trades_booked_through: float | None = None
+    # Liquidity rewards the exchange reports as earned, keyed by UTC date
+    # (YYYY-MM-DD). Assignment rather than accumulation, so re-reading a day
+    # -- which happens every tick while the current epoch is still growing --
+    # overwrites instead of double-counting. Deliberately not cash: see the
+    # module docstring.
+    earned_rewards_by_day: dict[str, float] = field(default_factory=dict)
 
     def book_matched(self, order_id: str, matched: float) -> None:
         """Remember the cumulative matched size already turned into fills for
@@ -383,11 +396,29 @@ class LiveMakingState:
         self.fills.append(fill)
         return fill
 
+    @property
+    def earned_reward_usd_total(self) -> float:
+        """Rewards the exchange reports as earned, across every reconciled
+        day. This is the number the Phase 1 gate weighs against adverse
+        selection; `realized_reward_usd_total` is the subset that has been
+        observed actually landing in the wallet."""
+        return sum(self.earned_rewards_by_day.values())
+
+    def record_earned_rewards(self, day: str, amount_usd: float) -> None:
+        """Record what the exchange says we earned on `day` (YYYY-MM-DD).
+        Idempotent by construction -- the day's total is assigned, not added,
+        so re-reconciling a still-growing epoch converges on the final figure
+        instead of stacking partials."""
+        self.earned_rewards_by_day[day] = amount_usd
+
     def record_reward_payout(self, amount_usd: float, *, note: str = "") -> None:
-        """Log a reward payout observed out-of-band (rewards dashboard or an
-        on-chain transfer) -- see the module docstring for why this can't be
-        reconciled automatically. Adds straight to cash, same as a fill
-        would, since it's real USDC that landed."""
+        """Log a reward *payout* -- USDC that actually landed, observed
+        out-of-band (an on-chain transfer, or the dashboard's paid figure).
+        Adds straight to cash, same as a fill would.
+
+        Not the same thing as `record_earned_rewards`: this moves cash and
+        should only be called for money in the wallet. Booking an earned-but-
+        unsettled epoch here would push `cash_usd` above the real balance."""
         self.reward_payouts.append({"amount_usd": amount_usd, "note": note, "recorded_at": _now_iso()})
         self.realized_reward_usd_total += amount_usd
         self.cash_usd += amount_usd
