@@ -113,6 +113,12 @@ class LiveTickReport:
     new_fills: list[dict] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     skipped: dict[str, int] = field(default_factory=dict)
+    # Did `reconcile_trades` successfully read trade history this tick? False
+    # means the book has not been confirmed against the exchange's own record
+    # of what matched, so anything derived from it -- equity above all -- is
+    # local belief rather than fact. The drawdown kill switch and new quoting
+    # both refuse to act on that; see `check_drawdown_kill_switch`.
+    trades_reconciled: bool = False
 
     def skip(self, reason: str) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
@@ -148,22 +154,22 @@ def _remote_status(order: dict) -> str:
     return str(order.get("status", "")).upper()
 
 
-def _fee_usd(clob: ClobClient, token_id: str, price: float, size_shares: float, cache: dict[str, int | None]) -> float:
-    """Best-effort realized fee for one fill. Book M only ever rests GTC
-    limit orders, so under §2.1's taker-only fee schedule this should be
-    ~0 (plus an unmodeled maker rebate) -- but that's the assumption Phase 1
-    exists to check, not something to assume here. Whatever
-    get_fee_rate_bps reports is recorded as-is; 0 if the endpoint doesn't
-    answer, not a guess."""
-    if token_id not in cache:
-        try:
-            cache[token_id] = clob.get_fee_rate_bps(token_id)
-        except Exception:
-            cache[token_id] = None
-    bps = cache[token_id]
-    if not bps:
-        return 0.0
-    return (bps / 10_000.0) * price * size_shares
+# Fee booked by the order-tracking path (`_apply_order_update`). Zero on
+# purpose, and not a guess: `get_open_orders`/`get_order` report an order's
+# matched size but never what the match cost, so this path knows a fill
+# happened and nothing about its fee. Trade history does carry the rate
+# actually charged per leg, and `reconcile_trades` -- which runs first and
+# books almost every fill -- uses it.
+#
+# (incident 2026-08-31: this used to call `get_fee_rate_bps(token_id)` and
+# charge `bps/10_000 * price * size`. That endpoint returns the market's
+# *posted ceiling*, not the rate billed on our fill -- 1000bps on three of
+# the markets quoted that day -- so the book accrued $8.86 of fees against a
+# $20.28 loss while trade history shows every one of the 30 legs, maker and
+# taker alike, charged exactly zero. A fabricated 44% of the reported loss.
+# Booking 0 here can only understate a fee that trade history will correct;
+# the old behaviour overstated one that never existed.)
+_ORDER_PATH_FEE_USD = 0.0
 
 
 def _adopt_untracked_order(remote: dict, token_to_market: dict[str, QuotableMarket]) -> LiveOrder | None:
@@ -245,7 +251,6 @@ def reconcile_fills(
         report.error(f"reconcile: get_open_orders failed, falling back to per-order lookups: {exc}")
         remote_orders = None
 
-    fee_cache: dict[str, int | None] = {}
     mid_cache: dict[str, float | None] = {}
 
     if remote_orders is not None:
@@ -253,8 +258,22 @@ def reconcile_fills(
         tracked_ids = {o.order_id for o in state.open_orders}
         untracked = set(remote_by_id) - tracked_ids
         for order_id in untracked:
+            booked = state.booked_matched.get(order_id)
+            if booked is not None and _remote_size_matched(remote_by_id[order_id]) <= booked + 1e-9:
+                # We already retired this order locally with every matched
+                # share booked. Re-adopting teaches us nothing and churns
+                # (adopt -> _apply_order_update -> retire -> adopt ...), one
+                # spurious drift error per tick for as long as the exchange
+                # keeps listing it.
+                continue
             adopted = _adopt_untracked_order(remote_by_id[order_id], token_to_market or {})
             if adopted is not None:
+                # Seed from the ledger, not from the payload's size_matched:
+                # what's already booked is the only thing that must not be
+                # booked again. Anything the exchange has matched beyond that
+                # is a real fill we haven't recorded yet, and taking the
+                # payload's value would silently swallow it.
+                adopted.size_matched = booked or 0.0
                 state.add_order(adopted)
                 report.error(
                     f"reconcile: adopted untracked order {order_id} (open on exchange, not tracked locally -- "
@@ -276,7 +295,7 @@ def reconcile_fills(
                 if remote is None:
                     state.remove_order(order.order_id)
                     continue
-            _apply_order_update(state, order, remote, report, fee_cache, mid_cache, clob, decision_log_path)
+            _apply_order_update(state, order, remote, report, mid_cache, clob, decision_log_path)
     else:
         for order in list(state.open_orders):
             try:
@@ -287,7 +306,7 @@ def reconcile_fills(
             if remote is None:
                 state.remove_order(order.order_id)
                 continue
-            _apply_order_update(state, order, remote, report, fee_cache, mid_cache, clob, decision_log_path)
+            _apply_order_update(state, order, remote, report, mid_cache, clob, decision_log_path)
 
 
 def _apply_order_update(
@@ -295,15 +314,20 @@ def _apply_order_update(
     order: LiveOrder,
     remote: dict,
     report: LiveTickReport,
-    fee_cache: dict[str, int | None],
     mid_cache: dict[str, float | None],
     clob: ClobClient,
     decision_log_path: str,
 ) -> None:
     matched = _remote_size_matched(remote)
-    delta = matched - order.size_matched
+    # Diff against the *persistent* record of what's already been booked for
+    # this order id, not just the in-memory order -- `order.size_matched`
+    # resets to whatever a re-adopted payload reports, and any shortfall gets
+    # re-booked as new fills (see LiveMakingState.book_matched's docstring for
+    # the 2026-08-31 incident this prevents).
+    already_booked = max(order.size_matched, state.booked_matched.get(order.order_id, 0.0))
+    delta = matched - already_booked
     if delta > 1e-9:
-        fee = _fee_usd(clob, order.token_id, order.price, delta, fee_cache)
+        fee = _ORDER_PATH_FEE_USD
         # task item 4: the markout baseline used to be order.quoted_midpoint
         # -- the midpoint when the order was *placed*, which can predate the
         # actual fill by however long the order rested (up to the old 30min
@@ -324,13 +348,274 @@ def _apply_order_update(
             fee_usd=fee,
             tick_size=order.tick_size,
             neg_risk=order.neg_risk,
+            source="orders",
         )
         report.new_fills.append(fill.__dict__)
         log_event({"kind": "fill", **fill.__dict__}, path=decision_log_path)
         order.size_matched = matched
+        state.book_matched(order.order_id, matched)
 
     if _remote_status(remote) in _CLOSED_STATUSES or matched >= order.size_shares - 1e-9:
         state.remove_order(order.order_id)
+
+
+# How far back `reconcile_trades` asks for trade history. Only has to exceed
+# the longest an order can plausibly rest between being placed and making its
+# last fill -- the per-order totals it computes are exact for any order whose
+# whole life fits inside the window, and an order still resting after this
+# long is still tracked, so `reconcile_fills` covers it. Generous because the
+# call is cheap (one paginated GET) and the failure mode of too short is a
+# silently missed fill.
+_TRADE_LOOKBACK_SECONDS = 3 * 24 * 60 * 60
+
+
+@dataclass
+class _TradeLeg:
+    """One side of one trade that was *ours*, normalized out of the taker-
+    centric payload `get_trades` returns."""
+
+    order_id: str
+    token_id: str
+    condition_id: str
+    side: FillSide
+    price: float
+    size_shares: float
+    fee_usd: float
+    matched_at: datetime
+
+
+def _our_trade_legs(trade: dict, account_address: str) -> list[_TradeLeg]:
+    """Extract the legs of `trade` belonging to `account_address`.
+
+    A Polymarket trade is reported from the taker's point of view: the
+    top-level `side`/`price`/`asset_id` are the taker's, and every maker it
+    matched against is listed separately under `maker_orders`. Book M rests
+    quotes, so it is nearly always the maker -- reading the top-level fields
+    would record a BUY as a SELL and invert the whole book. Which fields are
+    ours is decided by `trader_side`, with `maker_address` as the filter for
+    which of the maker legs is ours (the others belong to counterparties)."""
+    try:
+        matched_at = datetime.fromtimestamp(int(trade.get("match_time") or 0), tz=timezone.utc)
+    except (TypeError, ValueError):
+        return []
+    condition_id = str(trade.get("market") or "")
+
+    def _leg(order_id, token_id, side, price, size, fee_bps) -> _TradeLeg | None:
+        try:
+            price, size = float(price), float(size)
+        except (TypeError, ValueError):
+            return None
+        side = str(side).lower()
+        if not (order_id and token_id) or side not in ("buy", "sell") or size <= 0:
+            return None
+        try:
+            # Empty string is the API's "no fee on this leg", not a missing
+            # field -- every maker leg observed live reports '' and every
+            # taker leg '0'. This is the rate actually charged on this fill,
+            # which is why it, and not the market's posted rate, is the only
+            # fee any part of the book is allowed to believe (see
+            # ClobClient.get_fee_rate_bps).
+            fee_usd = (float(fee_bps or 0) / 10_000.0) * price * size
+        except (TypeError, ValueError):
+            fee_usd = 0.0
+        return _TradeLeg(
+            order_id=str(order_id),
+            token_id=str(token_id),
+            condition_id=condition_id,
+            side=side,  # type: ignore[arg-type]
+            price=price,
+            size_shares=size,
+            fee_usd=fee_usd,
+            matched_at=matched_at,
+        )
+
+    if str(trade.get("trader_side", "")).upper() == "TAKER":
+        leg = _leg(
+            trade.get("taker_order_id"),
+            trade.get("asset_id"),
+            trade.get("side"),
+            trade.get("price"),
+            trade.get("size"),
+            trade.get("fee_rate_bps"),
+        )
+        return [leg] if leg else []
+
+    legs = []
+    for maker in trade.get("maker_orders") or []:
+        if str(maker.get("maker_address", "")).lower() != account_address.lower():
+            continue
+        leg = _leg(
+            maker.get("order_id"),
+            maker.get("asset_id"),
+            maker.get("side"),
+            maker.get("price"),
+            maker.get("matched_amount"),
+            maker.get("fee_rate_bps"),
+        )
+        if leg:
+            legs.append(leg)
+    return legs
+
+
+def _fill_context(
+    state: LiveMakingState, leg: _TradeLeg, token_to_market: dict[str, QuotableMarket]
+) -> dict:
+    """Everything `record_fill` needs about the market a trade landed in,
+    resolved without requiring the market to still be quotable.
+
+    An existing position for the token wins over every other source: fills
+    key inventory on `(market_id, token_id)`, so resolving the same token to
+    two different market_ids over its life would split one real position
+    across two rows that never net against each other. After that, whatever
+    identifies the market -- the quotable universe, a tracked order, and
+    finally the condition_id off the trade itself, which is always present
+    and unique even when nothing else knows this market."""
+    for pos in state.positions:
+        if pos.token_id == leg.token_id:
+            return dict(
+                market_id=pos.market_id,
+                condition_id=pos.condition_id,
+                question=pos.question,
+                tick_size=pos.tick_size,
+                neg_risk=pos.neg_risk,
+            )
+    qm = token_to_market.get(leg.token_id)
+    if qm is not None:
+        return dict(
+            market_id=qm.market.id,
+            condition_id=qm.market.condition_id,
+            question=qm.market.question,
+            tick_size=qm.tick_size,
+            neg_risk=qm.market.neg_risk,
+        )
+    for order in state.open_orders:
+        if order.token_id == leg.token_id:
+            return dict(
+                market_id=order.market_id,
+                condition_id=order.condition_id,
+                question=order.question,
+                tick_size=order.tick_size,
+                neg_risk=order.neg_risk,
+            )
+    return dict(
+        market_id=leg.condition_id,
+        condition_id=leg.condition_id,
+        question=f"(unresolved market for token {leg.token_id})",
+        tick_size=0.01,
+        neg_risk=False,
+    )
+
+
+def reconcile_trades(
+    state: LiveMakingState,
+    clob: ClobClient,
+    report: LiveTickReport,
+    *,
+    decision_log_path: str,
+    token_to_market: dict[str, QuotableMarket] | None = None,
+) -> None:
+    """Book fills from trade history -- the source that doesn't depend on us
+    still watching the order.
+
+    `reconcile_fills` can only see a fill while the order is in
+    `state.open_orders`: it diffs `size_matched` on orders it's tracking. Any
+    fill that lands outside that window is invisible to it forever -- after
+    cancel-on-shutdown removes the order, after a crash between placing and
+    the next tick, or after the market leaves the quotable universe so
+    `_adopt_untracked_order` can't resolve it. Trades have no such window.
+
+    (incident 2026-08-31: 11 real fills totalling $95.65 never entered the
+    state, including all three buys of a market that laddered 0.50 -> 0.36 ->
+    0.34 against us. Because the position was invisible, the per-market
+    inventory cap never fired, the adverse-selection kill switch never saw
+    the markouts, and the engine never flattened it -- it had to be closed by
+    hand at 0.25, the single biggest loss of the run at -$9.00.)
+
+    Shares one ledger with `reconcile_fills` -- `state.booked_matched`, keyed
+    by order id -- so whichever source sees a fill first books it and the
+    other one no-ops. Both compare cumulative matched size against that
+    ledger and book only the difference; neither ever adds blindly."""
+    account = clob.account_address
+    if not account:
+        report.error("reconcile_trades: no funder/EOA address available, cannot attribute trades -- skipping")
+        return
+    after = int(datetime.now(timezone.utc).timestamp()) - _TRADE_LOOKBACK_SECONDS
+    # Never look behind the book's own start: a freshly reset state has an
+    # empty `booked_matched`, so without this floor every trade the wallet
+    # made in the last few days reads as new and lands on the clean book.
+    if state.trades_booked_through is not None:
+        after = max(after, int(state.trades_booked_through))
+    try:
+        trades = clob.get_trades(after=after)
+    except Exception as exc:
+        report.error(f"reconcile_trades: get_trades failed: {exc}")
+        return
+    # Every fill in the lookback window has now been booked or confirmed
+    # already-booked, so the book agrees with the exchange as of this tick.
+    report.trades_reconciled = True
+
+    # `after` above already asks the API for this, but enforce it locally too:
+    # the floor exists to stop a fresh book adopting the wallet's earlier
+    # trades, and that guarantee shouldn't rest on the server honouring a
+    # query parameter. Safe to apply per-leg because the floor is only ever
+    # stamped at reset, when no order is being tracked and so no order can
+    # have legs straddling it.
+    floor = (
+        datetime.fromtimestamp(state.trades_booked_through, tz=timezone.utc)
+        if state.trades_booked_through is not None
+        else None
+    )
+
+    by_order: dict[str, list[_TradeLeg]] = {}
+    for trade in trades:
+        if str(trade.get("status", "")).upper() == "FAILED":
+            continue
+        for leg in _our_trade_legs(trade, account):
+            if floor is not None and leg.matched_at < floor:
+                continue
+            by_order.setdefault(leg.order_id, []).append(leg)
+
+    mid_cache: dict[str, float | None] = {}
+    now = datetime.now(timezone.utc)
+    for order_id, legs in by_order.items():
+        booked = state.booked_matched.get(order_id, 0.0)
+        cumulative = 0.0
+        for leg in sorted(legs, key=lambda l: l.matched_at):
+            start, cumulative = cumulative, cumulative + leg.size_shares
+            # Only the slice of this leg beyond what's already booked is new.
+            # Walking legs oldest-first (rather than booking one lump at a
+            # blended price) keeps each recorded fill at the price it
+            # actually traded at.
+            new_shares = cumulative - max(start, booked)
+            if new_shares <= 1e-9:
+                continue
+            # The markout baseline is only meaningful for a fill we've caught
+            # promptly; for one surfaced hours later "the mid now" says
+            # nothing about the mid then, so leave it unknown rather than
+            # record a number that isn't one. compute_markouts scores off
+            # fill.price and refuses stale windows outright, so nothing
+            # downstream is fooled either way.
+            fresh = (now - leg.matched_at).total_seconds() <= 60.0
+            mid = _fetch_mid(clob, leg.token_id, mid_cache) if fresh else None
+            fill = state.record_fill(
+                side=leg.side,
+                price=leg.price,
+                size_shares=new_shares,
+                order_id=order_id,
+                token_id=leg.token_id,
+                mid_price_at_fill=mid if mid is not None else 0.0,
+                fee_usd=leg.fee_usd * (new_shares / leg.size_shares),
+                source="trades",
+                **_fill_context(state, leg, token_to_market or {}),
+            )
+            fill.filled_at = leg.matched_at.isoformat()
+            report.new_fills.append(fill.__dict__)
+            log_event({"kind": "fill", "source": "trades", **fill.__dict__}, path=decision_log_path)
+        if cumulative > booked + 1e-9:
+            state.book_matched(order_id, cumulative)
+            for order in state.open_orders:
+                if order.order_id == order_id:
+                    order.size_matched = max(order.size_matched, cumulative)
 
 
 _MARKOUT_HORIZONS_MINUTES = (("markout_5m_usd", 5.0), ("markout_30m_usd", 30.0))
@@ -454,8 +739,27 @@ def check_drawdown_kill_switch(state: LiveMakingState, report: LiveTickReport) -
     markout) before it can trip at all, which at a small live bankroll could
     be days of exposure. This one works from fill #1: any tick where
     `equity_usd` has dropped more than MAKING_LIVE_KILL_DRAWDOWN_FRACTION
-    below `bankroll_cap_usd` halts immediately."""
+    below `bankroll_cap_usd` halts immediately.
+
+    Requires `report.trades_reconciled` -- equity is the most drift-sensitive
+    number in the book (every phantom or missed fill moves it), so halting on
+    an equity that hasn't been confirmed against trade history this tick is
+    halting on a number we can't stand behind. Not halting is safe here
+    because `run_live_tick` already stops placing new quotes for the same
+    reason: an unreconciled tick adds no risk, it just doesn't get to
+    conclude anything about P&L.
+
+    (incident 2026-08-31: this halted the book at "equity $421.15 <= floor
+    $425.00". Trade history puts real equity that day at $479.72 -- the
+    $58.35 gap was double-booked phantom fills plus fabricated fees, and the
+    floor was never actually breached.)"""
     if state.halted:
+        return
+    if not report.trades_reconciled:
+        report.error(
+            "drawdown kill switch: skipped -- trade history unreconciled this tick, "
+            f"equity ${state.equity_usd:,.2f} is unconfirmed local belief"
+        )
         return
     floor = state.bankroll_cap_usd * (1.0 - MAKING_LIVE_KILL_DRAWDOWN_FRACTION)
     if state.equity_usd <= floor:
@@ -902,6 +1206,15 @@ def run_live_tick(
             token_to_market[qm.no_token_id] = qm
 
     if not dry_run:
+        # Trade history is the primary fill source and runs first, so it wins
+        # the `booked_matched` race for any fill both reconcilers can see --
+        # which matters because only this path knows the price and fee the
+        # match actually charged. `reconcile_fills` then books nothing but
+        # the residue: a fill visible in order state that trade history
+        # hasn't surfaced yet. It still runs (and still owns order lifecycle
+        # -- adopting untracked orders, retiring closed ones), it just no
+        # longer gets to define what a fill cost.
+        reconcile_trades(state, clob, report, decision_log_path=decision_log_path, token_to_market=token_to_market)
         reconcile_fills(state, clob, report, decision_log_path=decision_log_path, token_to_market=token_to_market)
         compute_markouts(state, clob, report)
         _mark_to_market(state, clob, report)
@@ -936,9 +1249,39 @@ def run_live_tick(
         report.errors.extend(cancel_report.errors)
         return report
 
+    if not dry_run and not report.trades_reconciled:
+        # Same reasoning as check_drawdown_kill_switch's gate: the cluster
+        # caps, the deployed-collateral budget and the per-market inventory
+        # cap below are all computed off a book we could not confirm against
+        # trade history this tick. Quoting into that is how 2026-08-31 kept
+        # laddering into a market whose real position it could not see. The
+        # cancels and flattens above have already run, so this skips adding
+        # exposure without stranding any -- and unlike a halt it clears by
+        # itself the moment the next get_trades call succeeds.
+        report.skip("trades_unreconciled_no_new_quotes")
+        return report
+
     sizing = _sizing_fractions(state.bankroll_cap_usd)
     per_market_budget_usd = sizing.inventory * state.bankroll_cap_usd
     selected: list[QuotableMarket] = _rank_affordable(universe.quotable, per_market_budget_usd)[:max_markets_quoted]
+
+    # A market ranking outside max_markets_quoted this tick doesn't stop
+    # being a live capital commitment -- ranking picks where to deploy *new*
+    # quotes, it says nothing about whether an already-resting order is
+    # still priced anywhere near the market. Without this, an order in a
+    # market that falls out of `selected` (e.g. a reward-rate reshuffle on
+    # universe refresh) goes unmonitored -- not stale-checked, not
+    # cancelled -- until it either re-enters the top-N or exits the universe
+    # entirely near resolution, and keeps absorbing fills the whole time.
+    # (incident 2026-08-31: an order sat at a fixed price for ~19 minutes
+    # and 4 fills while the market's mid ran 10.5c away from it.)
+    selected_ids = {qm.market.id for qm in selected}
+    for order in state.open_orders:
+        held = quotable_by_market.get(order.market_id)
+        if held is not None and held.market.id not in selected_ids:
+            selected.append(held)
+            selected_ids.add(held.market.id)
+
     books = _fetch_books(clob, selected, report)
 
     # Every resting quote order is a literal BUY (see _SIDE_TO_ORDER_SIDE's
@@ -998,6 +1341,14 @@ def run_live_tick(
             report.skip("already_resting_fresh")
             continue
 
+        # Cancel a stale resting order as soon as drift is detected, before
+        # any of the below checks that only gate whether a *replacement*
+        # quote can be placed (inventory cap, budget, cluster cap). A stale
+        # quote is the adverse-selection channel (§3.4); it must not be left
+        # resting just because there's no room for a fresh one this tick.
+        if existing and stale:
+            _cancel(state, clob, existing, report, dry_run=dry_run, decision_log_path=decision_log_path)
+
         # Net YES-equivalent exposure across both legs' tokens -- a NO share
         # is short-YES-equivalent, so it nets against a YES share rather than
         # being tracked as unrelated inventory (see live_state.py's
@@ -1055,9 +1406,6 @@ def run_live_tick(
             "resolution_source": tags.resolution_source,
             "date_bucket": tags.date_bucket,
         }
-
-        if existing and stale:
-            _cancel(state, clob, existing, report, dry_run=dry_run, decision_log_path=decision_log_path)
 
         results: list[str] = []
         any_failed = False

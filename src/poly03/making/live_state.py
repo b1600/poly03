@@ -31,6 +31,11 @@ from poly03.config import MAKING_LIVE_BANKROLL_CAP_USD, MAKING_LIVE_DECISION_LOG
 
 FillSide = Literal["buy", "sell"]
 
+# How many order ids `LiveMakingState.book_matched` keeps. Only needs to
+# outlive the window in which an order can still be resting (or lingering in
+# a stale open-orders read); everything older is unreachable.
+_MAX_BOOKED_MATCHED_ENTRIES = 5000
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -46,6 +51,15 @@ class LiveFill:
     are close in time by construction. `markout_{5,30}m_usd` are filled in
     later by `compute_markouts()` once that much time has actually passed;
     `None` means "not old enough to score yet", not zero.
+
+    `source` records which reconciler booked this fill. "trades" means it
+    came from trade history (`execution.reconcile_trades`) -- the exchange's
+    own record of what matched, carrying the price and fee actually charged.
+    "orders" means it was inferred by diffing a tracked order's matched size
+    (`execution.reconcile_fills`), which knows a fill happened but not what
+    it cost; that path books `fee_usd=0.0` and lets the next tick's trade
+    history be the authority. Defaults to "orders" so fills loaded from a
+    state file written before this field existed are labelled honestly.
     """
 
     id: str
@@ -61,6 +75,7 @@ class LiveFill:
     filled_at: str = field(default_factory=_now_iso)
     mid_price_at_fill: float = 0.0
     fee_usd: float = 0.0
+    source: str = "orders"
     markout_5m_usd: float | None = None
     markout_30m_usd: float | None = None
 
@@ -179,6 +194,44 @@ class LiveMakingState:
     one_sided_ticks: dict[str, int] = field(default_factory=dict)
     paused_markets: dict[str, str] = field(default_factory=dict)
     kill_switch_ack_scored_fills: int = 0
+    booked_matched: dict[str, float] = field(default_factory=dict)
+    # Unix timestamp before which trade history is *not* this book's to book.
+    # `booked_matched` dedups trades this book has already seen, but a book
+    # with no history -- a fresh reset -- has an empty ledger, so every trade
+    # inside reconcile_trades' lookback window would look brand new and get
+    # booked onto the clean state. `make live reset` stamps this with "now"
+    # so a new book starts from the moment it was created rather than
+    # inheriting whatever the wallet did in the preceding days. None means no
+    # floor (book the whole lookback), which is the right default for a state
+    # that predates this field.
+    trades_booked_through: float | None = None
+
+    def book_matched(self, order_id: str, matched: float) -> None:
+        """Remember the cumulative matched size already turned into fills for
+        `order_id`, so the same matched shares can never be booked twice.
+
+        `LiveOrder.size_matched` alone can't carry this: it dies with the
+        order the moment `_apply_order_update` retires it, and
+        `reconcile_fills`/`_adopt_untracked_order` can legitimately bring the
+        same order_id back under management afterwards (a cancel the exchange
+        rejected, a lost post response, a filled order the open-orders list is
+        still stale about). Without a record that outlives the order, every
+        such re-adoption re-books the order's whole matched size as brand-new
+        fills.
+
+        (incident 2026-08-31: order 0x2a3952b6 booked 15 + 25 real shares,
+        then 25 three more times *after* it had been cancelled -- $81 of buys
+        that never happened, which then drove a fictitious $56 equity gap, a
+        drawdown halt at a real equity that had never breached the floor, and
+        markouts scored against fills with no trade behind them.)"""
+        self.booked_matched[order_id] = matched
+        # Bounded history: dicts preserve insertion order, so the oldest
+        # order ids fall off first. At Book M's order rate this holds weeks
+        # of orders -- far longer than one can plausibly still be resting.
+        overflow = len(self.booked_matched) - _MAX_BOOKED_MATCHED_ENTRIES
+        if overflow > 0:
+            for stale in list(self.booked_matched)[:overflow]:
+                del self.booked_matched[stale]
 
     def resume_from_halt(self) -> None:
         """Clear a halt after investigation. Not just `halted = False` --
@@ -275,6 +328,7 @@ class LiveMakingState:
         fee_usd: float = 0.0,
         tick_size: float = 0.01,
         neg_risk: bool = False,
+        source: str = "orders",
     ) -> LiveFill:
         """Apply one real fill (buy adds to inventory, sell reduces it) and
         update cash/avg price/realized P&L accordingly. This is the single
@@ -324,6 +378,7 @@ class LiveMakingState:
             order_id=order_id,
             mid_price_at_fill=mid_price_at_fill,
             fee_usd=fee_usd,
+            source=source,
         )
         self.fills.append(fill)
         return fill

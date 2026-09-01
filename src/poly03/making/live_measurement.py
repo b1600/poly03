@@ -29,6 +29,13 @@ from poly03.making.live_state import LiveMakingState
 from poly03.making.state import MakingState
 
 GATE_MIN_FILLS = 500
+
+# How much of the P&L must be confirmed by the exchange's own trade history
+# before the Phase 1 gate will pass. Not 100%: a fill caught by order tracking
+# in the seconds before it surfaces in trade history is normal and harmless,
+# and it self-corrects. A book where this sits materially below 1.0 over 500
+# fills is one whose reconciliation is not working.
+GATE_MIN_TRADE_CONFIRMED_FRACTION = 0.95
 # Below this, dividing a real payout by an almost-zero window produces a
 # meaningless (and alarmingly large) rate rather than an early estimate.
 MIN_OBSERVATION_DAYS_FOR_RATE = 1.0 / 24.0  # 1 hour
@@ -136,21 +143,33 @@ class AdverseSelectionSummary:
     adverse_selection_usd: float  # sum of |unfavorable markouts| (positive)
     reward_usd: float
     fee_usd: float
+    n_trade_confirmed: int = 0  # fills sourced from trade history, not order diffs
 
     @property
     def capture_usd(self) -> float:
-        """rewards + rebate + spread capture, per §4's gate wording. Fees
-        are subtracted as a straight cost rather than netted against a
-        separate rebate line -- making/execution.py's `_fee_usd` doesn't
-        yet distinguish a maker rebate from a taker fee (§2.1's own
-        caveat), so until that's confirmed against real fills this treats
-        any recorded fee as pure cost, which understates capture if a
-        rebate is actually landing."""
+        """rewards + rebate + spread capture, per §4's gate wording. Fees are
+        subtracted as a straight cost rather than netted against a separate
+        rebate line: trade history reports one `fee_rate_bps` per leg with no
+        rebate component, so there is nothing to net against. Every leg
+        observed live so far has reported zero, maker and taker alike.
+
+        A fee here is therefore only as trustworthy as its fill's `source`.
+        Fills booked from trade history carry the rate actually charged;
+        fills booked by order tracking carry 0.0 because that path cannot see
+        a fee at all (see execution.py's `_ORDER_PATH_FEE_USD`). Check
+        `trade_confirmed_fraction` before reading much into this line."""
         return self.reward_usd - self.fee_usd + self.spread_capture_usd
 
     @property
     def net_usd(self) -> float:
         return self.capture_usd - self.adverse_selection_usd
+
+    @property
+    def trade_confirmed_fraction(self) -> float:
+        """Share of fills the exchange's own trade history confirms. Below
+        1.0 means part of this P&L rests on order-tracking inference, which
+        knows that a fill happened but not what it cost."""
+        return self.n_trade_confirmed / self.n_fills if self.n_fills else 1.0
 
 
 def adverse_selection_summary(state: LiveMakingState) -> AdverseSelectionSummary:
@@ -177,6 +196,7 @@ def adverse_selection_summary(state: LiveMakingState) -> AdverseSelectionSummary
         adverse_selection_usd=adverse,
         reward_usd=state.realized_reward_usd_total,
         fee_usd=state.realized_fee_usd_total,
+        n_trade_confirmed=sum(1 for f in state.fills if f.source == "trades"),
     )
 
 
@@ -200,6 +220,19 @@ def phase1_gate(state: LiveMakingState) -> Phase1Gate:
 
     if summary.n_fills < GATE_MIN_FILLS:
         blockers.append(f"{summary.n_fills} fills recorded, need >={GATE_MIN_FILLS}")
+    # Scaling to the $10k book on a P&L the exchange hasn't confirmed is the
+    # 2026-08-31 failure with two more zeroes: that day's book reported a
+    # $78.63 drawdown against a real $20.28 loss, and every component of its
+    # gate readout -- capture, fees, adverse selection -- was wrong. A fill
+    # order tracking inferred is evidence something matched, not evidence of
+    # what it cost.
+    if summary.n_fills and summary.trade_confirmed_fraction < GATE_MIN_TRADE_CONFIRMED_FRACTION:
+        blockers.append(
+            f"only {summary.n_trade_confirmed}/{summary.n_fills} fills "
+            f"({summary.trade_confirmed_fraction:.0%}) are confirmed by trade history, "
+            f"need >={GATE_MIN_TRADE_CONFIRMED_FRACTION:.0%} -- the rest are order-tracking "
+            "inferences carrying no real fee or price"
+        )
     if summary.n_scored == 0:
         blockers.append("no fills old enough yet to have a markout (needs 5m+)")
     elif summary.net_usd <= 0:
