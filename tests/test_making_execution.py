@@ -17,6 +17,7 @@ from poly03.making.execution import (
     check_adverse_selection_kill_switch,
     check_drawdown_kill_switch,
     check_market_pauses,
+    cancel_stale_quotes,
     compute_markouts,
     reconcile_fills,
     reconcile_rewards,
@@ -1487,3 +1488,130 @@ def test_run_live_tick_reconciles_rewards():
 
     assert state.earned_reward_usd_total == pytest.approx(1.25)
     assert not [e for e in report.errors if "reconcile_rewards" in e]
+
+
+# --- stale-quote repricing (2026-08-31) -------------------------------------
+#
+# The staleness check itself predates the incident. The bug was where it
+# lived: inside the per-market quoting loop, behind four `continue`s. So
+# cancelling a stale quote -- which only sheds risk -- was gated on the engine
+# being able to price a replacement, a far stronger condition.
+
+
+def _one_sided_book(best_bid=0.60, size=500.0):
+    """Bids only -- the ask side has been pulled."""
+    return OrderBook(asset_id="111", bids=[{"price": best_bid, "size": size}], asks=[])
+
+
+def _resting_quote(order_id="order-1", *, side="buy", token_id="111", price=0.72, quoted_mid=0.745):
+    return LiveOrder(
+        order_id=order_id,
+        market_id="m",
+        condition_id="0xabc",
+        token_id=token_id,
+        question="q",
+        side=side,
+        price=price,
+        size_shares=40.0,
+        quoted_midpoint=quoted_mid,
+    )
+
+
+def _sweep(state, clob):
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+    cancel_stale_quotes(state, clob, report, dry_run=False, decision_log_path="/dev/null")
+    return report
+
+
+def test_sweep_cancels_a_quote_the_mid_has_run_away_from():
+    """The incident shape: a bid quoted against a 0.745 mid, still resting
+    once the mid reached 0.640."""
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting_quote(quoted_mid=0.745))
+    clob = FakeClob(books={"111": _book(best_bid=0.635, best_ask=0.645)})
+
+    report = _sweep(state, clob)
+
+    assert clob.cancelled == [["order-1"]]
+    assert report.skipped.get("stale_quote_mid_moved") == 1
+    assert state.open_orders == []
+
+
+def test_sweep_cancels_when_the_book_cannot_be_fetched():
+    """One `get_order_books` batch covers 100 tokens. Under the old code a
+    single failed batch stranded every stale quote in that chunk for as long
+    as it kept failing. A quote we cannot price is one we cannot manage."""
+
+    class NoBooks(FakeClob):
+        def get_order_books(self, token_ids):
+            raise RuntimeError("book endpoint down")
+
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting_quote())
+    clob = NoBooks()
+
+    report = _sweep(state, clob)
+
+    assert clob.cancelled == [["order-1"]]
+    assert report.skipped.get("stale_quote_no_reference_price") == 1
+    assert any("stale-quote sweep" in e for e in report.errors)
+
+
+def test_sweep_prices_against_the_surviving_side_of_a_one_sided_book():
+    """The old loop skipped these markets outright (`book_not_two_sided`),
+    which is precisely when a resting quote is most exposed. Best bid 0.60
+    against a 0.745 quote is stale by 14.5c."""
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting_quote(quoted_mid=0.745))
+    clob = FakeClob(books={"111": _one_sided_book(best_bid=0.60)})
+
+    report = _sweep(state, clob)
+
+    assert clob.cancelled == [["order-1"]]
+    assert report.skipped.get("stale_quote_mid_moved") == 1
+
+
+def test_sweep_leaves_a_fresh_quote_resting():
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting_quote(quoted_mid=0.745))
+    clob = FakeClob(books={"111": _book(best_bid=0.742, best_ask=0.748)})
+
+    report = _sweep(state, clob)
+
+    assert clob.cancelled == []
+    assert [o.order_id for o in state.open_orders] == ["order-1"]
+    assert report.skipped == {}
+
+
+def test_sweep_ignores_flatten_sells():
+    """`_flatten_market` already cancels and re-places them every tick."""
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting_quote(order_id="flat-1", side="sell"))
+    clob = FakeClob(books={"111": _book(best_bid=0.635, best_ask=0.645)})
+
+    report = _sweep(state, clob)
+
+    assert clob.cancelled == []
+    assert report.skipped == {}
+
+
+def test_sweep_runs_before_the_unreconciled_tick_bails_out():
+    """The unreconciled guard stops new quoting. It must not also strand the
+    quotes already resting -- that would leave the book at its most exposed
+    exactly when it knows least. Same argument for the halt path."""
+
+    class NoTrades(FakeClob):
+        def get_trades(self, *, after=None):
+            raise RuntimeError("trade history unavailable")
+
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting_quote(quoted_mid=0.745))
+    clob = NoTrades(books={"111": _book(best_bid=0.635, best_ask=0.645)})
+
+    report = run_live_tick(
+        state, universe=UniverseReport(), gamma=FakeGamma(), clob=clob, max_markets_quoted=10, dry_run=False
+    )
+
+    assert report.skipped.get("stale_quote_mid_moved") == 1
+    assert report.skipped.get("trades_unreconciled_no_new_quotes") == 1
+    assert state.open_orders == []

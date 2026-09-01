@@ -826,6 +826,14 @@ def cmd_make_live_run(args: argparse.Namespace) -> None:
                 notifier.log(_report_line(report, state))
                 for e in report.errors[:5]:
                     notifier.log(f"  error: {e}")
+                # `make live tick` has always logged these; the run loop did
+                # not, so a tick that quoted nothing left no record of why.
+                # That gap is why the 2026-08-31 log cannot explain five
+                # consecutive placed=0 cancelled=0 ticks while a resting bid
+                # was being run over.
+                if report.skipped:
+                    ranked = sorted(report.skipped.items(), key=lambda kv: -kv[1])
+                    notifier.log(f"  skipped: {', '.join(f'{k}={v}' for k, v in ranked)}")
                 if state.halted:
                     # task item 6: page the moment a halt trips, not one full
                     # --interval late (the old code only re-checked

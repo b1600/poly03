@@ -664,6 +664,83 @@ def reconcile_rewards(state: LiveMakingState, clob: ClobClient, report: LiveTick
         state.record_earned_rewards(day, total)
 
 
+def _reference_price(book) -> float | None:
+    """A price to judge a resting quote against. The midpoint when the book
+    is two-sided, otherwise whichever side still exists -- a book that has
+    lost a side is exactly when a stale quote is most dangerous, so falling
+    back to the surviving side beats declining to look."""
+    bb, ba = book.best_bid, book.best_ask
+    if bb is not None and ba is not None and ba.price > bb.price:
+        return (bb.price + ba.price) / 2.0
+    if bb is not None:
+        return bb.price
+    if ba is not None:
+        return ba.price
+    return None
+
+
+def cancel_stale_quotes(
+    state: LiveMakingState,
+    clob: ClobClient,
+    report: LiveTickReport,
+    *,
+    dry_run: bool,
+    decision_log_path: str,
+) -> None:
+    """Cancel every resting quote whose reference price has moved past
+    MAKING_REQUOTE_MID_MOVE_CENTS -- as its own pass, before anything that
+    can decline to run.
+
+    The staleness check itself is not new; where it lived was the bug. It sat
+    inside the per-market quoting loop, *after* four `continue`s that skip a
+    market when its book is missing, one-sided, unranked or paused. So the
+    cancel -- which only ever removes risk -- was conditional on the engine
+    being able to price a *replacement*, which is a much stronger condition.
+    A single failed `get_order_books` batch (one request covers 100 tokens)
+    silently stranded every stale quote in that chunk, for as long as the
+    batch kept failing.
+
+    This pass asks only about tokens we actually have resting, which is
+    bounded by open orders rather than the universe, so it does not share the
+    170-market batch's failure mode. When no reference price can be had at
+    all the quote is cancelled rather than kept: a quote we cannot price is
+    one we cannot manage, and the arithmetic is not close -- a tick of
+    forgone rewards across the whole book is worth a fraction of a cent
+    (2026-08-31: $2.88 across 170 markets for a whole day), while one stale
+    fill on 2026-08-31 cost 8c/share on 25 shares.
+
+    Flatten sells are left alone: `_flatten_market` already cancels and
+    re-places them every tick, so they reprice on their own.
+
+    (incident 2026-08-31: a bid rested at 0.72 while the mid fell to 0.645
+    and then 0.640, taking 7.5c and 8.0c/share of adverse selection on fills
+    the engine never repriced against. Five consecutive ticks logged
+    placed=0 cancelled=0 while that happened.)"""
+    quotes = [o for o in state.open_orders if o.side == "buy"]
+    if not quotes:
+        return
+
+    try:
+        books = clob.get_order_books(sorted({o.token_id for o in quotes}))
+    except Exception as exc:
+        report.error(f"stale-quote sweep: order-book fetch failed, cancelling all resting quotes: {exc}")
+        books = {}
+
+    stale: list[LiveOrder] = []
+    for order in quotes:
+        book = books.get(order.token_id)
+        reference = _reference_price(book) if book is not None else None
+        if reference is None:
+            report.skip("stale_quote_no_reference_price")
+            stale.append(order)
+        elif needs_requote(order.quoted_midpoint, reference, MAKING_REQUOTE_MID_MOVE_CENTS):
+            report.skip("stale_quote_mid_moved")
+            stale.append(order)
+
+    if stale:
+        _cancel(state, clob, stale, report, dry_run=dry_run, decision_log_path=decision_log_path)
+
+
 _MARKOUT_HORIZONS_MINUTES = (("markout_5m_usd", 5.0), ("markout_30m_usd", 30.0))
 
 
@@ -1268,6 +1345,12 @@ def run_live_tick(
         check_adverse_selection_kill_switch(state, report)
         check_market_pauses(state, report)
         check_drawdown_kill_switch(state, report)
+
+    # Before anything that can bail out of this tick -- the halt return, the
+    # unreconciled-book return, the per-market `continue`s in the quoting
+    # loop. Cancelling a stale quote only sheds risk, so nothing downstream
+    # should be able to prevent it.
+    cancel_stale_quotes(state, clob, report, dry_run=dry_run, decision_log_path=decision_log_path)
 
     # Unwind anything we're holding (orders or inventory) in a market that
     # has fallen out of the quotable universe -- most commonly because it
