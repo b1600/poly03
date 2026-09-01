@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from poly03.classifier.rules import Classification
 from poly03.classifier.taxonomy import Tier
 from poly03.data.models import OrderBook
@@ -15,10 +17,14 @@ from poly03.making.execution import (
     check_adverse_selection_kill_switch,
     check_drawdown_kill_switch,
     check_market_pauses,
+    cancel_stale_quotes,
     compute_markouts,
+    reconcile_fills,
+    reconcile_rewards,
+    reconcile_trades,
     run_live_tick,
 )
-from poly03.making.live_state import LiveMakingState
+from poly03.making.live_state import LiveMakingState, LiveOrder
 from poly03.making.quoting import build_quote_pair
 from poly03.making.rewards import RewardConfig
 from poly03.making.universe import QuotableMarket, UniverseReport
@@ -76,8 +82,11 @@ class FakeGamma:
 
 
 class FakeClob:
-    def __init__(self, sampling=(), books=None, conditional_balances=None):
+    def __init__(self, sampling=(), books=None, conditional_balances=None, trades=(), earnings=None):
         self._sampling = list(sampling)
+        # {"YYYY-MM-DD": [{"condition_id": ..., "earnings": "1.5"}, ...]}
+        self.earnings = dict(earnings or {})
+        self.earnings_calls: list[str] = []
         self._books = books or {}
         self.posted: list[dict] = []
         self.cancelled: list[list[str]] = []
@@ -86,6 +95,7 @@ class FakeClob:
         # care about on-chain balance capping are unaffected; pass a dict
         # {token_id: shares} to simulate a specific real balance.
         self._conditional_balances = conditional_balances or {}
+        self.trades: list[dict] = list(trades or ())
 
     def get_conditional_balance(self, token_id):
         return self._conditional_balances.get(token_id, float("inf"))
@@ -107,6 +117,15 @@ class FakeClob:
 
     def get_open_orders(self, **kw):
         return []
+
+    account_address = "0xfunder"
+
+    def get_trades(self, *, after=None):
+        return list(self.trades)
+
+    def get_earnings_for_day(self, date):
+        self.earnings_calls.append(date)
+        return list(self.earnings.get(date, []))
 
     def post_limit_order(self, *, token_id, price, size, side, tick_size, neg_risk):
         if self._post_side_effect is not None:
@@ -231,6 +250,119 @@ def test_partial_leg_failure_rolls_back_the_successful_leg(market_factory):
     assert any("rolled back" in e for e in report.errors)
 
 
+# --- stale-order cancellation isn't gated on ranking or placement room -----
+# (incident 2026-08-31: an order sat at a fixed price for ~19 minutes and 4
+# fills while its market's mid ran 10.5c away from it, because the market had
+# dropped out of `selected` and nothing else ever re-checked it for drift.)
+
+
+def test_stale_order_cancelled_even_when_market_falls_out_of_selected(market_factory):
+    market_a = _quotable_market(market_factory)
+    market_a.id = "market-a"
+    market_a.condition_id = "0xaaa"
+    market_a.clob_token_ids = ["a-yes", "a-no"]
+
+    market_b = _quotable_market(market_factory)
+    market_b.id = "market-b"
+    market_b.condition_id = "0xbbb"
+    market_b.clob_token_ids = ["b-yes", "b-no"]
+
+    clob = FakeClob(
+        [
+            _sampling_entry("0xaaa", daily=1000),  # ranks first
+            _sampling_entry("0xbbb", daily=1),  # ranks last -- falls out at max_markets_quoted=1
+        ],
+        {"a-yes": _book(), "b-yes": _book(best_bid=0.48, best_ask=0.52)},
+    )
+    gamma = FakeGamma([market_a, market_b])
+
+    state = LiveMakingState(bankroll_cap_usd=100_000.0, cash_usd=100_000.0)
+    state.open_orders.append(
+        LiveOrder(
+            order_id="stale-order-b",
+            market_id="market-b",
+            condition_id="0xbbb",
+            token_id="b-yes",
+            question=market_b.question,
+            side="buy",
+            price=0.30,
+            size_shares=20,
+            quoted_midpoint=0.30,  # current book mid is 0.50 -- 20c of drift
+        )
+    )
+
+    from poly03.making.execution import refresh_universe
+
+    universe = refresh_universe(gamma, clob, max_gamma_markets=10)
+    assert {qm.market.id for qm in universe.quotable} == {"market-a", "market-b"}
+
+    run_live_tick(state, universe=universe, gamma=gamma, clob=clob, max_markets_quoted=1, dry_run=False)
+
+    assert "stale-order-b" in [oid for batch in clob.cancelled for oid in batch]
+    assert "stale-order-b" not in [o.order_id for o in state.open_orders]
+
+
+def test_stale_order_cancelled_even_when_budget_exhausted_for_replacement(market_factory):
+    market = _quotable_market(market_factory)
+    market.id = "market-a"
+
+    # A second quotable market holding a large *fresh* (non-stale) order --
+    # kept quotable rather than dropped from the universe so it isn't
+    # unwound before `deployed` is computed, the way an unaffordable/expired
+    # market would be. Its collateral alone eats almost the whole bankroll.
+    market_other = _quotable_market(market_factory, best_bid=0.88, best_ask=0.92)
+    market_other.id = "market-other"
+    market_other.condition_id = "0xother"
+    market_other.clob_token_ids = ["other-yes", "other-no"]
+
+    clob = FakeClob(
+        [_sampling_entry("0xabc"), _sampling_entry("0xother")],
+        {"111": _book(), "other-yes": _book(best_bid=0.88, best_ask=0.92)},
+    )
+    gamma = FakeGamma([market, market_other])
+
+    # Bankroll is mostly committed to the other market, so there's no room
+    # left to place a replacement quote here -- the stale order must still
+    # get cancelled even though it can't be replaced this tick.
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
+    state.open_orders.append(
+        LiveOrder(
+            order_id="fresh-order-other",
+            market_id="market-other",
+            condition_id="0xother",
+            token_id="other-yes",
+            question=market_other.question,
+            side="buy",
+            price=0.90,
+            size_shares=100,
+            quoted_midpoint=0.90,  # matches current book mid -- not stale
+        )
+    )
+    state.open_orders.append(
+        LiveOrder(
+            order_id="stale-order-a",
+            market_id="market-a",
+            condition_id="0xabc",
+            token_id="111",
+            question=market.question,
+            side="buy",
+            price=0.30,
+            size_shares=20,
+            quoted_midpoint=0.30,  # current book mid is 0.50 -- 20c of drift
+        )
+    )
+
+    from poly03.making.execution import refresh_universe
+
+    universe = refresh_universe(gamma, clob, max_gamma_markets=10)
+    report = run_live_tick(state, universe=universe, gamma=gamma, clob=clob, max_markets_quoted=10, dry_run=False)
+
+    assert "stale-order-a" in [oid for batch in clob.cancelled for oid in batch]
+    assert "stale-order-a" not in [o.order_id for o in state.open_orders]
+    assert "fresh-order-other" in [o.order_id for o in state.open_orders]  # untouched, wasn't stale
+    assert "live_budget_exhausted" in report.skipped
+
+
 # --- sizing fractions (Phase 0 vs. shakedown) --------------------------
 #
 # Threshold is $10k, not $500: Phase 0's 0.02 fraction only clears real
@@ -324,7 +456,9 @@ def test_drawdown_kill_switch_trips_at_configured_fraction():
     from poly03.config import MAKING_LIVE_KILL_DRAWDOWN_FRACTION
 
     state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0)
-    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+    # Equity is only actionable once trade history has confirmed the book;
+    # see test_drawdown_kill_switch_does_not_halt_on_an_unconfirmed_book.
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport(), trades_reconciled=True)
 
     check_drawdown_kill_switch(state, report)
     assert not state.halted
@@ -333,6 +467,29 @@ def test_drawdown_kill_switch_trips_at_configured_fraction():
     check_drawdown_kill_switch(state, report)
     assert state.halted
     assert any("drawdown kill switch" in r for r in state.halt_reasons)
+
+
+def test_drawdown_kill_switch_does_not_halt_on_an_unconfirmed_book():
+    """2026-08-31: the book halted at "equity $421.15 <= floor $425.00" while
+    trade history put real equity at $479.72 -- the floor was never breached,
+    the gap was phantom fills and fabricated fees. Equity moves with every
+    mis-booked fill, so it is only worth halting on once this tick has
+    actually reconciled against trade history."""
+    from poly03.config import MAKING_LIVE_KILL_DRAWDOWN_FRACTION
+
+    state = LiveMakingState(bankroll_cap_usd=100.0, cash_usd=100.0 * (1 - MAKING_LIVE_KILL_DRAWDOWN_FRACTION) - 0.01)
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+    assert report.trades_reconciled is False
+
+    check_drawdown_kill_switch(state, report)
+
+    assert not state.halted
+    assert any("unreconciled" in e for e in report.errors)
+
+    # ...and the moment the same equity *is* confirmed, it halts.
+    report.trades_reconciled = True
+    check_drawdown_kill_switch(state, report)
+    assert state.halted
 
 
 def test_adverse_selection_kill_switch_still_requires_consecutive_bad_fills():
@@ -605,3 +762,856 @@ def test_flatten_position_skips_when_no_real_balance_remains():
     # equity/deployed-collateral with shares that don't exist.
     assert pos.net_shares == 0.0
     assert state.open_positions == []
+
+
+# --- fill reconciliation: matched size is booked exactly once (2026-08-31) ---
+#
+# The incident: an order's matched size was re-booked as new fills every time
+# the order came back under management after being retired -- $81 of buys that
+# never happened, a $56 gap between tracked and real equity, and a drawdown
+# halt at an equity the account had never actually reached. See
+# LiveMakingState.book_matched.
+
+
+class _ReconcileClob:
+    """Serves a fixed open-orders list, for reconcile_fills only."""
+
+    def __init__(self, open_orders):
+        self.open_orders = list(open_orders)
+
+    def get_open_orders(self, **kw):
+        return [dict(o) for o in self.open_orders]
+
+    def get_order(self, order_id):
+        for o in self.open_orders:
+            if o["id"] == order_id:
+                return dict(o)
+        return None
+
+    def get_order_book(self, token_id):
+        return _book()
+
+    def get_fee_rate_bps(self, token_id):
+        return None
+
+    def get_earnings_for_day(self, date):
+        return []
+
+
+def _remote_order(order_id="order-1", *, matched, size=20.0, price=0.45, status="LIVE"):
+    return {
+        "id": order_id,
+        "asset_id": "111",
+        "price": price,
+        "original_size": size,
+        "size_matched": matched,
+        "status": status,
+    }
+
+
+def _resting(market_id, order_id="order-1", *, size=20.0, price=0.45):
+    return LiveOrder(
+        order_id=order_id,
+        market_id=market_id,
+        condition_id="0xabc",
+        token_id="111",
+        question="Test market?",
+        side="buy",
+        price=price,
+        size_shares=size,
+        quoted_midpoint=0.5,
+    )
+
+
+def _reconcile(state, clob, quotable, *, log_path):
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+    reconcile_fills(state, clob, report, decision_log_path=log_path, token_to_market={"111": quotable})
+    return report
+
+
+def test_filled_order_still_listed_open_is_not_rebooked_every_tick(tmp_path, market_factory):
+    """The exact incident shape: an order fills, gets retired locally, and the
+    exchange keeps returning it from get_open_orders. Each later tick used to
+    re-adopt it (size_matched back to what the payload said) and book its
+    whole matched size again as a brand-new fill."""
+    log_path = str(tmp_path / "decisions.jsonl")
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting(quotable.market.id))
+    clob = _ReconcileClob([_remote_order(matched=20.0)])
+
+    for _ in range(5):
+        report = _reconcile(state, clob, quotable, log_path=log_path)
+
+    assert len(state.fills) == 1
+    assert state.fills[0].size_shares == 20.0
+    assert state.positions[0].net_shares == 20.0
+    assert state.cash_usd == 500.0 - 20.0 * 0.45
+    # ...and it stops logging a drift error on every single tick, too.
+    assert report.errors == []
+
+
+def test_cancelled_order_that_the_exchange_still_lists_does_not_rebook(tmp_path, market_factory):
+    """Order 0x2a3952b6's shape: cancelled locally after filling, then still
+    present in later open-orders reads. Removal from state.open_orders must
+    not amnesty the matched size it already booked."""
+    log_path = str(tmp_path / "decisions.jsonl")
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting(quotable.market.id, size=40.0, price=0.72))
+    clob = _ReconcileClob([_remote_order(matched=40.0, size=40.0, price=0.72)])
+
+    _reconcile(state, clob, quotable, log_path=log_path)
+    assert len(state.fills) == 1
+    state.remove_order("order-1")  # e.g. a cancel the exchange never applied
+
+    for _ in range(3):
+        _reconcile(state, clob, quotable, log_path=log_path)
+
+    assert len(state.fills) == 1
+    assert state.positions[0].net_shares == 40.0
+
+
+def test_readopted_order_books_only_the_matched_size_not_yet_booked(tmp_path, market_factory):
+    """The ledger must not overshoot in the other direction: an order that
+    matches *more* after we lose track of it still owes us that fill, and
+    only that fill."""
+    log_path = str(tmp_path / "decisions.jsonl")
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting(quotable.market.id, size=40.0, price=0.72))
+    clob = _ReconcileClob([_remote_order(matched=15.0, size=40.0, price=0.72)])
+
+    _reconcile(state, clob, quotable, log_path=log_path)
+    assert [f.size_shares for f in state.fills] == [15.0]
+
+    state.remove_order("order-1")
+    clob.open_orders = [_remote_order(matched=40.0, size=40.0, price=0.72)]
+    _reconcile(state, clob, quotable, log_path=log_path)
+
+    assert [f.size_shares for f in state.fills] == [15.0, 25.0]
+    assert state.positions[0].net_shares == 40.0
+
+
+def test_untracked_order_with_matched_size_is_booked_once_when_adopted(tmp_path, market_factory):
+    """An order we never tracked (lost post response) that already has a fill
+    on it: adopting must book that fill once, not swallow it and not repeat
+    it once the ledger knows about it."""
+    log_path = str(tmp_path / "decisions.jsonl")
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = _ReconcileClob([_remote_order(matched=20.0, size=40.0)])
+
+    for _ in range(3):
+        _reconcile(state, clob, quotable, log_path=log_path)
+
+    assert [f.size_shares for f in state.fills] == [20.0]
+    assert state.positions[0].net_shares == 20.0
+
+
+def test_booked_matched_survives_a_save_load_round_trip(tmp_path, market_factory):
+    """The ledger is only useful if it outlives the process -- the run loop
+    restarts constantly (Ctrl+C, halts, crashes) and a fresh state that has
+    forgotten what it booked re-books everything still on the book."""
+    from poly03.making.live_state import load_state, save_state
+
+    log_path = str(tmp_path / "decisions.jsonl")
+    state_path = tmp_path / "live_state.json"
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting(quotable.market.id))
+    clob = _ReconcileClob([_remote_order(matched=20.0)])
+    _reconcile(state, clob, quotable, log_path=log_path)
+    save_state(state, state_path)
+
+    resumed = load_state(state_path)
+    assert resumed.booked_matched == {"order-1": 20.0}
+    _reconcile(resumed, clob, quotable, log_path=log_path)
+
+    assert len(resumed.fills) == 1
+    assert resumed.cash_usd == 500.0 - 20.0 * 0.45
+
+
+# --- fills booked from trade history (2026-08-31) ---------------------------
+#
+# reconcile_fills can only see a fill while the order is still tracked. 11
+# real fills ($95.65) landed outside that window and were never booked --
+# including all three buys of the market that lost the most money, which the
+# inventory cap, the kill switch and the flatten path were all blind to
+# because the position didn't exist as far as the state was concerned.
+
+_FUNDER = "0xFuNdEr0000000000000000000000000000000001"
+
+
+class _TradeClob(_ReconcileClob):
+    account_address = _FUNDER
+
+    def __init__(self, trades=()):
+        super().__init__([])
+        self.trades = list(trades)
+        self.trade_calls: list[int | None] = []
+
+    def get_trades(self, *, after=None):
+        self.trade_calls.append(after)
+        return [dict(t) for t in self.trades]
+
+
+def _ago(minutes):
+    return datetime.now(timezone.utc) - timedelta(minutes=minutes)
+
+
+def _maker_trade(
+    order_id="order-1",
+    *,
+    token_id="111",
+    our_side="BUY",
+    price=0.45,
+    size=20.0,
+    minutes_ago=10.0,
+    condition_id="0xabc",
+    fee_bps="",
+    maker_address=_FUNDER,
+    status="CONFIRMED",
+):
+    """A trade where we were the maker. Note the top-level side/price belong
+    to the *taker* and are deliberately the opposite of ours -- reading them
+    instead of our maker leg is the mistake this shape exists to catch."""
+    taker_side = "SELL" if our_side == "BUY" else "BUY"
+    return {
+        "id": f"trade-{order_id}-{minutes_ago}",
+        "market": condition_id,
+        "asset_id": token_id,
+        "side": taker_side,
+        "size": str(size),
+        "price": str(price),
+        "status": status,
+        "match_time": str(int(_ago(minutes_ago).timestamp())),
+        "trader_side": "MAKER",
+        "maker_orders": [
+            {
+                "order_id": order_id,
+                "maker_address": maker_address,
+                "matched_amount": str(size),
+                "price": str(price),
+                "asset_id": token_id,
+                "side": our_side,
+                "fee_rate_bps": fee_bps,
+            }
+        ],
+    }
+
+
+def _taker_trade(order_id="order-t", *, token_id="111", side="SELL", price=0.60, size=20.0, minutes_ago=10.0):
+    return {
+        "id": f"trade-{order_id}",
+        "market": "0xabc",
+        "asset_id": token_id,
+        "side": side,
+        "size": str(size),
+        "price": str(price),
+        "status": "CONFIRMED",
+        "match_time": str(int(_ago(minutes_ago).timestamp())),
+        "trader_side": "TAKER",
+        "taker_order_id": order_id,
+        "fee_rate_bps": "0",
+        "maker_orders": [],
+    }
+
+
+def _reconcile_trades(state, clob, quotable, *, log_path):
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+    token_to_market = {"111": quotable} if quotable is not None else {}
+    reconcile_trades(state, clob, report, decision_log_path=log_path, token_to_market=token_to_market)
+    return report
+
+
+def test_maker_leg_is_booked_on_our_side_not_the_takers(tmp_path, market_factory):
+    """The payload is taker-centric: our BUY is reported as a top-level SELL.
+    Booking the top-level side would invert the entire book."""
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = _TradeClob([_maker_trade(our_side="BUY", price=0.45, size=20.0)])
+
+    _reconcile_trades(state, clob, quotable, log_path=str(tmp_path / "d.jsonl"))
+
+    assert [(f.side, f.size_shares, f.price) for f in state.fills] == [("buy", 20.0, 0.45)]
+    assert state.positions[0].net_shares == 20.0
+    assert state.cash_usd == 500.0 - 20.0 * 0.45
+
+
+def test_fill_is_booked_even_though_no_order_was_ever_tracked(tmp_path, market_factory):
+    """The incident's core failure: the fill landed after the order stopped
+    being tracked (cancel-on-shutdown, a crash, a market leaving the
+    universe), so order-diff reconciliation could never see it."""
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    assert state.open_orders == []
+    clob = _TradeClob([_maker_trade(our_side="BUY", price=0.50, size=20.0)])
+
+    _reconcile_trades(state, clob, None, log_path=str(tmp_path / "d.jsonl"))
+
+    assert [f.size_shares for f in state.fills] == [20.0]
+    assert state.open_positions[0].net_shares == 20.0
+
+
+def test_trades_are_not_rebooked_on_every_tick(tmp_path, market_factory):
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = _TradeClob([_maker_trade(our_side="BUY", price=0.45, size=20.0)])
+
+    for _ in range(5):
+        _reconcile_trades(state, clob, quotable, log_path=str(tmp_path / "d.jsonl"))
+
+    assert len(state.fills) == 1
+    assert state.cash_usd == 500.0 - 20.0 * 0.45
+
+
+def test_trade_reconciliation_does_not_rebook_what_order_diff_already_booked(tmp_path, market_factory):
+    """Both sources share state.booked_matched, keyed by order id -- whichever
+    sees a fill first books it and the other no-ops. Without that they'd each
+    book the same fill independently."""
+    log_path = str(tmp_path / "d.jsonl")
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting(quotable.market.id))
+    order_clob = _ReconcileClob([_remote_order(matched=20.0)])
+    _reconcile(state, order_clob, quotable, log_path=log_path)
+    assert len(state.fills) == 1
+
+    trade_clob = _TradeClob([_maker_trade("order-1", our_side="BUY", price=0.45, size=20.0)])
+    _reconcile_trades(state, trade_clob, quotable, log_path=log_path)
+
+    assert len(state.fills) == 1
+    assert state.positions[0].net_shares == 20.0
+
+
+def test_only_the_unbooked_slice_is_taken_and_at_its_own_price(tmp_path, market_factory):
+    """An order that filled twice at different prices, with only the first
+    already booked: the second must be booked at *its* price, not at a blend
+    of the two."""
+    log_path = str(tmp_path / "d.jsonl")
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.book_matched("order-1", 20.0)  # first leg already booked elsewhere
+    clob = _TradeClob(
+        [
+            _maker_trade("order-1", our_side="BUY", price=0.50, size=20.0, minutes_ago=30),
+            _maker_trade("order-1", our_side="BUY", price=0.36, size=15.0, minutes_ago=10),
+        ]
+    )
+
+    _reconcile_trades(state, clob, quotable, log_path=log_path)
+
+    assert [(f.size_shares, f.price) for f in state.fills] == [(15.0, 0.36)]
+
+
+def test_counterparty_maker_legs_are_not_attributed_to_us(tmp_path, market_factory):
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = _TradeClob([_maker_trade(our_side="BUY", maker_address="0xSomeoneElse")])
+
+    _reconcile_trades(state, clob, quotable, log_path=str(tmp_path / "d.jsonl"))
+
+    assert state.fills == []
+    assert state.cash_usd == 500.0
+
+
+def test_failed_trades_are_ignored(tmp_path, market_factory):
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = _TradeClob([_maker_trade(our_side="BUY", status="FAILED")])
+
+    _reconcile_trades(state, clob, quotable, log_path=str(tmp_path / "d.jsonl"))
+
+    assert state.fills == []
+
+
+def test_taker_leg_reduces_inventory(tmp_path, market_factory):
+    """Flatten orders cross the spread, so they come back as TAKER trades --
+    where the top-level fields *are* ours."""
+    log_path = str(tmp_path / "d.jsonl")
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = _TradeClob(
+        [
+            _maker_trade("order-1", our_side="BUY", price=0.45, size=20.0, minutes_ago=30),
+            _taker_trade("order-2", side="SELL", price=0.60, size=20.0, minutes_ago=10),
+        ]
+    )
+
+    _reconcile_trades(state, clob, quotable, log_path=log_path)
+
+    assert [(f.side, f.size_shares) for f in state.fills] == [("buy", 20.0), ("sell", 20.0)]
+    assert state.open_positions == []
+    assert state.cash_usd == 500.0 - 20.0 * 0.45 + 20.0 * 0.60
+
+
+def test_fill_is_stamped_with_the_trades_own_match_time(tmp_path, market_factory):
+    """A fill surfaced late must not claim to have happened now -- markout
+    windows key off filled_at, and a wrong timestamp would score a 40-minute-
+    old fill as if it were a fresh 5-minute markout."""
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = _TradeClob([_maker_trade(our_side="BUY", minutes_ago=40.0)])
+
+    _reconcile_trades(state, clob, quotable, log_path=str(tmp_path / "d.jsonl"))
+
+    age = (datetime.now(timezone.utc) - datetime.fromisoformat(state.fills[0].filled_at)).total_seconds()
+    assert 39 * 60 < age < 41 * 60
+    # ...and no mid is invented for it; "the mid now" is not the mid then.
+    assert state.fills[0].mid_price_at_fill == 0.0
+
+
+def test_existing_position_row_wins_so_inventory_never_splits(tmp_path, market_factory):
+    """Fills key inventory on (market_id, token_id). If the same token
+    resolved to a different market_id later in its life, one real position
+    would be split across two rows that never net against each other."""
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.record_fill(
+        market_id="legacy-market",
+        condition_id="0xabc",
+        token_id="111",
+        question="Test market?",
+        side="buy",
+        price=0.40,
+        size_shares=10.0,
+        order_id="older-order",
+    )
+    clob = _TradeClob([_maker_trade("order-1", token_id="111", our_side="BUY", price=0.45, size=20.0)])
+
+    _reconcile_trades(state, clob, quotable, log_path=str(tmp_path / "d.jsonl"))
+
+    assert len(state.positions) == 1
+    assert state.positions[0].market_id == "legacy-market"
+    assert state.positions[0].net_shares == 30.0
+
+
+def test_unresolvable_market_still_books_the_fill_against_its_condition_id(tmp_path, market_factory):
+    """Nothing knows this token -- not the universe, not a position, not a
+    tracked order. Dropping the fill was the old behaviour; the money moved
+    either way, so book it against the one identifier the trade always
+    carries."""
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = _TradeClob([_maker_trade(token_id="999", our_side="BUY", price=0.30, size=20.0, condition_id="0xdead")])
+
+    _reconcile_trades(state, clob, None, log_path=str(tmp_path / "d.jsonl"))
+
+    assert state.positions[0].market_id == "0xdead"
+    assert state.positions[0].net_shares == 20.0
+
+
+def test_trade_fees_come_from_the_trade_not_the_markets_posted_rate(tmp_path, market_factory):
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = _TradeClob([_maker_trade(our_side="BUY", price=0.50, size=20.0, fee_bps="100")])
+
+    _reconcile_trades(state, clob, quotable, log_path=str(tmp_path / "d.jsonl"))
+
+    assert state.realized_fee_usd_total == 0.01 * 0.50 * 20.0
+    assert state.cash_usd == 500.0 - 20.0 * 0.50 - 0.10
+
+
+def test_trade_history_is_requested_with_a_bounded_lookback(tmp_path, market_factory):
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = _TradeClob([])
+
+    _reconcile_trades(state, clob, quotable, log_path=str(tmp_path / "d.jsonl"))
+
+    now = datetime.now(timezone.utc).timestamp()
+    assert clob.trade_calls and now - 4 * 86400 < clob.trade_calls[0] <= now - 2 * 86400
+
+
+# --- trade history as the primary fill source (2026-08-31) -------------------
+#
+# The incident's P&L was wrong in three ways at once: fills booked twice, real
+# fills never booked at all, and a fee line fabricated from the market's posted
+# ceiling rather than the rate actually charged. Trade history fixes all three
+# because it is the exchange's own record of what matched -- it does not depend
+# on us still tracking the order, and it carries the real price and fee.
+
+
+class _PostedRateClob(_ReconcileClob):
+    """Order-tracking source whose market advertises a fat posted fee rate.
+    1000bps is not hypothetical -- it is what `get_fee_rate_bps` returned for
+    three of the markets quoted on 2026-08-31."""
+
+    def __init__(self, open_orders):
+        super().__init__(open_orders)
+        self.fee_rate_calls: list[str] = []
+
+    def get_fee_rate_bps(self, token_id):
+        self.fee_rate_calls.append(token_id)
+        return 1000
+
+
+def test_order_path_books_no_fee_from_the_markets_posted_rate(tmp_path, market_factory):
+    """The posted rate is a ceiling, not a bill. Trade history showed all 30
+    legs of the incident charged zero while the book accrued $8.86 -- 44% of a
+    $20.28 loss that never happened. The order path cannot know a fee, so it
+    must not invent one."""
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting("m", size=20.0, price=0.45))
+    clob = _PostedRateClob([_remote_order(matched=20.0, size=20.0, price=0.45, status="MATCHED")])
+
+    _reconcile(state, clob, quotable, log_path=str(tmp_path / "d.jsonl"))
+
+    assert len(state.fills) == 1
+    assert state.fills[0].fee_usd == 0.0
+    assert state.realized_fee_usd_total == 0.0
+    # Cash moves by the notional and nothing else.
+    assert state.cash_usd == 500.0 - 20.0 * 0.45
+    # And we no longer even ask -- the endpoint cannot answer the question.
+    assert clob.fee_rate_calls == []
+
+
+def test_fills_record_which_reconciler_booked_them(tmp_path, market_factory):
+    quotable = _qm(_quotable_market(market_factory))
+
+    from_trades = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    _reconcile_trades(
+        from_trades,
+        _TradeClob([_maker_trade(our_side="BUY", price=0.45, size=20.0)]),
+        quotable,
+        log_path=str(tmp_path / "t.jsonl"),
+    )
+    assert from_trades.fills[0].source == "trades"
+
+    from_orders = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    from_orders.add_order(_resting("m", size=20.0, price=0.45))
+    _reconcile(
+        from_orders,
+        _ReconcileClob([_remote_order(matched=20.0, status="MATCHED")]),
+        quotable,
+        log_path=str(tmp_path / "o.jsonl"),
+    )
+    assert from_orders.fills[0].source == "orders"
+
+
+def test_trade_history_wins_the_ledger_race_against_order_tracking(tmp_path, market_factory):
+    """Both reconcilers can see the same fill. Whichever books it first owns
+    the `booked_matched` ledger and the other no-ops -- so the ordering in
+    run_live_tick is what decides whether the fill carries the real fee and
+    price from trade history, or the order path's fee-free approximation.
+    Trade history must go first."""
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting("m", size=20.0, price=0.45))
+
+    # Same 20 shares, visible to both sources at once.
+    _reconcile_trades(
+        state,
+        _TradeClob([_maker_trade(order_id="order-1", our_side="BUY", price=0.45, size=20.0, fee_bps="30")]),
+        quotable,
+        log_path=str(tmp_path / "d.jsonl"),
+    )
+    _reconcile(state, _PostedRateClob([_remote_order(matched=20.0, status="MATCHED")]), quotable, log_path=str(tmp_path / "d.jsonl"))
+
+    assert len(state.fills) == 1, "the same 20 shares must not be booked twice"
+    assert state.fills[0].source == "trades"
+    assert state.fills[0].fee_usd == 0.003 * 0.45 * 20.0
+    assert state.positions[0].net_shares == 20.0
+
+
+def test_run_live_tick_reconciles_trades_before_orders(market_factory, monkeypatch):
+    """Ordering is load-bearing (see the test above), so assert it directly
+    rather than trusting the two calls stay in the right order."""
+    import poly03.making.execution as ex
+
+    calls: list[str] = []
+    monkeypatch.setattr(ex, "reconcile_trades", lambda *a, **k: calls.append("trades"))
+    monkeypatch.setattr(ex, "reconcile_fills", lambda *a, **k: calls.append("fills"))
+    monkeypatch.setattr(ex, "compute_markouts", lambda *a, **k: None)
+    monkeypatch.setattr(ex, "_mark_to_market", lambda *a, **k: None)
+
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    ex.run_live_tick(
+        state,
+        universe=UniverseReport(),
+        gamma=FakeGamma(),
+        clob=FakeClob(),
+        max_markets_quoted=1,
+        dry_run=False,
+    )
+
+    assert calls == ["trades", "fills"]
+
+
+class _NoTradeHistoryClob(FakeClob):
+    def get_trades(self, *, after=None):
+        raise RuntimeError("trade history unavailable")
+
+
+def test_unreconciled_tick_places_no_new_quotes(market_factory):
+    """A book we could not confirm against trade history is a book whose
+    positions, cluster exposure and deployed collateral are all unverified.
+    Quoting into that is how the incident kept laddering into a market whose
+    real position it could not see. Unlike a halt this clears itself as soon
+    as get_trades answers again."""
+    market = _quotable_market(market_factory)
+    universe = UniverseReport(quotable=[_qm(market)])
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = _NoTradeHistoryClob(books={"111": _book(), "222": _book()})
+
+    report = run_live_tick(
+        state, universe=universe, gamma=FakeGamma(), clob=clob, max_markets_quoted=10, dry_run=False
+    )
+
+    assert clob.posted == []
+    assert report.skipped.get("trades_unreconciled_no_new_quotes") == 1
+    assert not state.halted, "an unreadable tick is transient, not a halt"
+
+
+def test_a_fresh_book_does_not_adopt_the_wallets_earlier_trades(tmp_path, market_factory):
+    """A reset book has an empty `booked_matched`, so without a floor every
+    trade inside the lookback window reads as brand new and lands on the
+    clean state -- re-booking days of unrelated wallet activity as Book M's
+    own fills, with its cash."""
+    quotable = _qm(_quotable_market(market_factory))
+    older = _maker_trade(order_id="before-reset", our_side="BUY", price=0.45, size=20.0, minutes_ago=600.0)
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=480.65)
+    state.trades_booked_through = (datetime.now(timezone.utc) - timedelta(minutes=5)).timestamp()
+    clob = _TradeClob([older])
+
+    _reconcile_trades(state, clob, quotable, log_path=str(tmp_path / "d.jsonl"))
+
+    assert state.fills == []
+    assert state.cash_usd == 480.65
+    # The floor is what's asked of the API, not a post-filter.
+    assert clob.trade_calls[0] == int(state.trades_booked_through)
+
+
+def test_the_floor_never_shortens_the_lookback_for_an_established_book(tmp_path, market_factory):
+    """`trades_booked_through` is a floor for books that have no history, not
+    a rolling watermark -- an established book must still see the full
+    lookback so a fill that surfaces late is not skipped."""
+    quotable = _qm(_quotable_market(market_factory))
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    assert state.trades_booked_through is None
+    clob = _TradeClob([_maker_trade(our_side="BUY", price=0.45, size=20.0, minutes_ago=600.0)])
+
+    _reconcile_trades(state, clob, quotable, log_path=str(tmp_path / "d.jsonl"))
+
+    assert len(state.fills) == 1
+
+
+# --- liquidity rewards: the one positive term, finally measured -------------
+
+
+def _earn(cond, amount):
+    return {"condition_id": cond, "earnings": str(amount), "maker_address": _FUNDER}
+
+
+def _reconcile_rewards(state, clob):
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+    reconcile_rewards(state, clob, report)
+    return report
+
+
+def test_rewards_are_summed_across_the_days_markets():
+    today = datetime.now(timezone.utc).date().isoformat()
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = FakeClob(earnings={today: [_earn("0xa", 0.32), _earn("0xb", 0.25), _earn("0xc", 0.001)]})
+
+    _reconcile_rewards(state, clob)
+
+    assert state.earned_rewards_by_day[today] == pytest.approx(0.571)
+    assert state.earned_reward_usd_total == pytest.approx(0.571)
+
+
+def test_rereading_a_growing_epoch_converges_instead_of_stacking():
+    """The current day's epoch is still accumulating, so it gets re-read every
+    tick. Accumulating rather than assigning would inflate rewards without
+    bound -- the same double-booking shape as the fill incident, on the one
+    number the strategy is judged by."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = FakeClob(earnings={today: [_earn("0xa", 1.0)]})
+
+    _reconcile_rewards(state, clob)
+    _reconcile_rewards(state, clob)
+    clob.earnings[today] = [_earn("0xa", 2.5)]  # epoch grew
+    _reconcile_rewards(state, clob)
+
+    assert state.earned_reward_usd_total == pytest.approx(2.5)
+
+
+def test_earned_rewards_never_move_cash():
+    """An epoch is reported as earned before it settles. Crediting it to cash
+    would push the book above the real wallet balance -- the drift class this
+    whole incident was about."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=480.65)
+    clob = FakeClob(earnings={today: [_earn("0xa", 2.88)]})
+
+    _reconcile_rewards(state, clob)
+
+    assert state.cash_usd == 480.65
+    assert state.realized_reward_usd_total == 0.0
+    assert state.earned_reward_usd_total == pytest.approx(2.88)
+
+
+def test_a_day_with_no_rewards_is_recorded_as_zero_not_skipped():
+    """Skipping empty days would let a stale figure survive after the
+    exchange revises a day down."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.record_earned_rewards(today, 5.0)
+
+    _reconcile_rewards(state, FakeClob(earnings={}))
+
+    assert state.earned_rewards_by_day[today] == 0.0
+
+
+def test_reward_fetch_failure_is_reported_not_fatal():
+    class Broken(FakeClob):
+        def get_earnings_for_day(self, date):
+            raise RuntimeError("rewards endpoint down")
+
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    report = _reconcile_rewards(state, Broken())
+
+    assert state.earned_rewards_by_day == {}
+    assert len(report.errors) == 2  # today + yesterday
+    assert all("reconcile_rewards" in e for e in report.errors)
+
+
+def test_run_live_tick_reconciles_rewards():
+    today = datetime.now(timezone.utc).date().isoformat()
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    clob = FakeClob(earnings={today: [_earn("0xa", 1.25)]})
+
+    report = run_live_tick(
+        state, universe=UniverseReport(), gamma=FakeGamma(), clob=clob, max_markets_quoted=1, dry_run=False
+    )
+
+    assert state.earned_reward_usd_total == pytest.approx(1.25)
+    assert not [e for e in report.errors if "reconcile_rewards" in e]
+
+
+# --- stale-quote repricing (2026-08-31) -------------------------------------
+#
+# The staleness check itself predates the incident. The bug was where it
+# lived: inside the per-market quoting loop, behind four `continue`s. So
+# cancelling a stale quote -- which only sheds risk -- was gated on the engine
+# being able to price a replacement, a far stronger condition.
+
+
+def _one_sided_book(best_bid=0.60, size=500.0):
+    """Bids only -- the ask side has been pulled."""
+    return OrderBook(asset_id="111", bids=[{"price": best_bid, "size": size}], asks=[])
+
+
+def _resting_quote(order_id="order-1", *, side="buy", token_id="111", price=0.72, quoted_mid=0.745):
+    return LiveOrder(
+        order_id=order_id,
+        market_id="m",
+        condition_id="0xabc",
+        token_id=token_id,
+        question="q",
+        side=side,
+        price=price,
+        size_shares=40.0,
+        quoted_midpoint=quoted_mid,
+    )
+
+
+def _sweep(state, clob):
+    report = LiveTickReport(timestamp="t", dry_run=False, universe=UniverseReport())
+    cancel_stale_quotes(state, clob, report, dry_run=False, decision_log_path="/dev/null")
+    return report
+
+
+def test_sweep_cancels_a_quote_the_mid_has_run_away_from():
+    """The incident shape: a bid quoted against a 0.745 mid, still resting
+    once the mid reached 0.640."""
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting_quote(quoted_mid=0.745))
+    clob = FakeClob(books={"111": _book(best_bid=0.635, best_ask=0.645)})
+
+    report = _sweep(state, clob)
+
+    assert clob.cancelled == [["order-1"]]
+    assert report.skipped.get("stale_quote_mid_moved") == 1
+    assert state.open_orders == []
+
+
+def test_sweep_cancels_when_the_book_cannot_be_fetched():
+    """One `get_order_books` batch covers 100 tokens. Under the old code a
+    single failed batch stranded every stale quote in that chunk for as long
+    as it kept failing. A quote we cannot price is one we cannot manage."""
+
+    class NoBooks(FakeClob):
+        def get_order_books(self, token_ids):
+            raise RuntimeError("book endpoint down")
+
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting_quote())
+    clob = NoBooks()
+
+    report = _sweep(state, clob)
+
+    assert clob.cancelled == [["order-1"]]
+    assert report.skipped.get("stale_quote_no_reference_price") == 1
+    assert any("stale-quote sweep" in e for e in report.errors)
+
+
+def test_sweep_prices_against_the_surviving_side_of_a_one_sided_book():
+    """The old loop skipped these markets outright (`book_not_two_sided`),
+    which is precisely when a resting quote is most exposed. Best bid 0.60
+    against a 0.745 quote is stale by 14.5c."""
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting_quote(quoted_mid=0.745))
+    clob = FakeClob(books={"111": _one_sided_book(best_bid=0.60)})
+
+    report = _sweep(state, clob)
+
+    assert clob.cancelled == [["order-1"]]
+    assert report.skipped.get("stale_quote_mid_moved") == 1
+
+
+def test_sweep_leaves_a_fresh_quote_resting():
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting_quote(quoted_mid=0.745))
+    clob = FakeClob(books={"111": _book(best_bid=0.742, best_ask=0.748)})
+
+    report = _sweep(state, clob)
+
+    assert clob.cancelled == []
+    assert [o.order_id for o in state.open_orders] == ["order-1"]
+    assert report.skipped == {}
+
+
+def test_sweep_ignores_flatten_sells():
+    """`_flatten_market` already cancels and re-places them every tick."""
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting_quote(order_id="flat-1", side="sell"))
+    clob = FakeClob(books={"111": _book(best_bid=0.635, best_ask=0.645)})
+
+    report = _sweep(state, clob)
+
+    assert clob.cancelled == []
+    assert report.skipped == {}
+
+
+def test_sweep_runs_before_the_unreconciled_tick_bails_out():
+    """The unreconciled guard stops new quoting. It must not also strand the
+    quotes already resting -- that would leave the book at its most exposed
+    exactly when it knows least. Same argument for the halt path."""
+
+    class NoTrades(FakeClob):
+        def get_trades(self, *, after=None):
+            raise RuntimeError("trade history unavailable")
+
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    state.add_order(_resting_quote(quoted_mid=0.745))
+    clob = NoTrades(books={"111": _book(best_bid=0.635, best_ask=0.645)})
+
+    report = run_live_tick(
+        state, universe=UniverseReport(), gamma=FakeGamma(), clob=clob, max_markets_quoted=10, dry_run=False
+    )
+
+    assert report.skipped.get("stale_quote_mid_moved") == 1
+    assert report.skipped.get("trades_unreconciled_no_new_quotes") == 1
+    assert state.open_orders == []

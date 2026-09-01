@@ -112,6 +112,15 @@ class ClobClient:
             return None
 
     def get_fee_rate_bps(self, token_id: str) -> int | None:
+        """The market's *posted* fee ceiling -- NOT what any fill of ours was
+        charged. Do not wire this into P&L.
+
+        (incident 2026-08-31: making/execution.py sized realized fees off this
+        and accrued $8.86 against a $20.28 real loss. This endpoint returned
+        1000bps for three of the markets quoted that day; trade history shows
+        all 30 legs, maker and taker, were charged exactly zero. The rate
+        actually billed is per-leg `fee_rate_bps` on `get_trades`, which
+        `execution.reconcile_trades` reads.)"""
         try:
             return self._client.get_fee_rate_bps(token_id)
         except Exception:
@@ -181,6 +190,56 @@ class ClobClient:
         self._require_l2()
         try:
             return self._client.get_order(order_id)
+        except Exception:
+            return None
+
+    def get_trades(self, *, after: int | None = None) -> list[dict]:
+        """Every trade this account was a party to, newest-first, optionally
+        only those matched at/after unix timestamp `after`. The v2 client
+        walks the cursor internally and returns the fully-collected list.
+
+        This is the only fill source that doesn't depend on us still
+        tracking the order: an order's matched size is visible from
+        `get_open_orders`/`get_order` only while we're watching it, but its
+        trades stay in history forever. See execution.py's
+        `reconcile_trades` for why that distinction cost real money.
+
+        Note each trade is reported from the *taker's* point of view --
+        top-level `side`/`price`/`asset_id` describe the taker's leg, and our
+        own leg is in `maker_orders` whenever `trader_side` is MAKER. Book M
+        is a maker, so reading the top-level fields directly would invert
+        nearly every fill. `_our_trade_legs` is the one place that untangles
+        it."""
+        self._require_l2()
+        from py_clob_client_v2.clob_types import TradeParams
+
+        return self._client.get_trades(TradeParams(after=after))
+
+    def get_earnings_for_day(self, date: str) -> list[dict]:
+        """Per-market liquidity rewards this account earned on `date`
+        (YYYY-MM-DD, UTC). Each row carries `condition_id` and `earnings` in
+        USDC. Returns [] for a day with no rewards -- and for the current
+        day, returns the epoch so far, which grows until the day closes.
+
+        Rewards were long assumed unreconcilable (the old py-clob-client had
+        no such endpoint, and `LiveMakingState.record_reward_payout` exists
+        because of that). py-clob-client-v2 does expose it, which matters:
+        rewards are the only positive term in Book M's thesis, so leaving
+        them unmeasured left the strategy's central question unanswerable.
+        Measured at $2.88 for 2026-08-31 against $8.85 of adverse selection
+        -- the first hard read on whether the book can work."""
+        self._require_l2()
+        return self._client.get_earnings_for_user_for_day(date)
+
+    @property
+    def account_address(self) -> str | None:
+        """The address our fills are attributed to in trade history --
+        the funder (proxy) wallet when trading through one, else the
+        signing EOA."""
+        if self.creds.funder_address:
+            return self.creds.funder_address
+        try:
+            return self._client.get_address()
         except Exception:
             return None
 

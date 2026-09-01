@@ -135,3 +135,70 @@ def test_drawdown_stats_tracks_peak_to_trough():
     dd = m.drawdown_stats(state)
     assert dd.max_drawdown_usd > 0
     assert 0.0 < dd.max_drawdown_fraction < 1.0
+
+
+# --- Book M live P&L provenance (2026-08-31) --------------------------------
+
+
+def _live_fill(state, *, source, fee_usd=0.0, markout=None):
+    from poly03.making.live_state import LiveMakingState  # noqa: F401
+
+    f = state.record_fill(
+        market_id="m",
+        condition_id="c",
+        token_id="111",
+        question="q",
+        side="buy",
+        price=0.50,
+        size_shares=20.0,
+        order_id="o",
+        fee_usd=fee_usd,
+        source=source,
+    )
+    f.markout_30m_usd = markout
+    return f
+
+
+def test_live_summary_reports_what_share_of_the_pnl_the_exchange_confirms():
+    from poly03.making import live_measurement as lm
+    from poly03.making.live_state import LiveMakingState
+
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    for _ in range(3):
+        _live_fill(state, source="trades", markout=1.0)
+    _live_fill(state, source="orders", markout=-1.0)
+
+    adv = lm.adverse_selection_summary(state)
+
+    assert adv.n_fills == 4
+    assert adv.n_trade_confirmed == 3
+    assert adv.trade_confirmed_fraction == 0.75
+
+
+def test_live_gate_blocks_on_a_pnl_trade_history_has_not_confirmed():
+    """The incident's gate readout was computed off a book wrong by $58 in
+    every component. A P&L the exchange hasn't confirmed cannot clear a gate
+    whose whole purpose is authorising a 20x scale-up."""
+    from poly03.making import live_measurement as lm
+    from poly03.making.live_state import LiveMakingState
+
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    for _ in range(lm.GATE_MIN_FILLS):
+        _live_fill(state, source="orders", markout=1.0)
+
+    blockers = lm.phase1_gate(state).blockers
+
+    assert any("confirmed by trade history" in b for b in blockers)
+
+
+def test_live_gate_does_not_block_a_fully_confirmed_book():
+    from poly03.making import live_measurement as lm
+    from poly03.making.live_state import LiveMakingState
+
+    state = LiveMakingState(bankroll_cap_usd=500.0, cash_usd=500.0)
+    for _ in range(lm.GATE_MIN_FILLS):
+        _live_fill(state, source="trades", markout=1.0)
+
+    blockers = lm.phase1_gate(state).blockers
+
+    assert not any("confirmed by trade history" in b for b in blockers)

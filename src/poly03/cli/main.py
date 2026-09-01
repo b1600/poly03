@@ -560,8 +560,14 @@ def cmd_make_live_status(args: argparse.Namespace) -> None:
     _log(f"deployed collateral: ${state.deployed_collateral_usd:,.2f}")
     _log(f"equity: ${state.equity_usd:,.2f}")
     _log(f"open positions: {len(state.open_positions)}  open orders: {len(state.open_orders)}  fills: {len(state.fills)}")
-    _log(f"realized reward: ${state.realized_reward_usd_total:,.2f} ({len(state.reward_payouts)} logged payouts)")
+    _log(
+        f"earned reward: ${state.earned_reward_usd_total:,.2f} "
+        f"({len(state.earned_rewards_by_day)} day(s) reconciled)"
+    )
+    _log(f"reward paid into cash: ${state.realized_reward_usd_total:,.2f} ({len(state.reward_payouts)} logged payouts)")
     _log(f"realized fee: ${state.realized_fee_usd_total:,.2f}")
+    from_trades = sum(1 for f in state.fills if f.source == "trades")
+    _log(f"fills confirmed by trade history: {from_trades}/{len(state.fills)}")
 
     scored_5m = [f.markout_5m_usd for f in state.fills if f.markout_5m_usd is not None]
     scored_30m = [f.markout_30m_usd for f in state.fills if f.markout_30m_usd is not None]
@@ -619,9 +625,15 @@ def cmd_make_live_report(args: argparse.Namespace, log=_log) -> None:
     adv = m.adverse_selection_summary(state)
     log("\nadverse selection (markout-based, 30m where matured else 5m):")
     log(f"  fills: {adv.n_fills}  scored: {adv.n_scored}")
+    log(
+        f"  confirmed by trade history: {adv.n_trade_confirmed}/{adv.n_fills} "
+        f"({adv.trade_confirmed_fraction:.0%})"
+    )
     log(f"  spread capture (favorable markouts): ${adv.spread_capture_usd:,.2f}")
     log(f"  adverse selection (unfavorable markouts): ${adv.adverse_selection_usd:,.2f}")
-    log(f"  reward: ${adv.reward_usd:,.2f}   fees: ${adv.fee_usd:,.2f}")
+    log(f"  reward (earned): ${adv.reward_usd:,.2f}   fees: ${adv.fee_usd:,.2f}")
+    if adv.adverse_selection_usd > 0:
+        log(f"  reward / adverse selection: {adv.reward_usd / adv.adverse_selection_usd:.0%}")
     log(f"  capture (reward + spread capture - fees): ${adv.capture_usd:,.2f}")
     log(f"  net (capture - adverse selection): ${adv.net_usd:+,.2f}")
 
@@ -667,15 +679,32 @@ def cmd_make_live_resume(args: argparse.Namespace) -> None:
 
 
 def cmd_make_live_reset(args: argparse.Namespace) -> None:
+    from datetime import datetime, timezone
     from pathlib import Path
 
     from poly03.config import MAKING_LIVE_BANKROLL_CAP_USD
     from poly03.making.live_state import LiveMakingState, save_state
 
     cap = args.bankroll_cap if args.bankroll_cap is not None else MAKING_LIVE_BANKROLL_CAP_USD
-    save_state(LiveMakingState(bankroll_cap_usd=cap, cash_usd=cap), args.state_file)
+    # A reset after a bookkeeping drift incident has to start from the real
+    # wallet balance, not from the cap -- seeding cash=cap silently re-books
+    # whatever the drift lost (or gained) as if it were still there. Default
+    # stays cap for a genuinely fresh book. `make live preflight` prints the
+    # real USDC balance to pass here.
+    cash = args.cash if args.cash is not None else cap
+    # Stamp the trade-history floor at "now" so the fresh book does not adopt
+    # the wallet's preceding days of trades on its first reconcile -- see
+    # LiveMakingState.trades_booked_through.
+    save_state(
+        LiveMakingState(
+            bankroll_cap_usd=cap,
+            cash_usd=cash,
+            trades_booked_through=datetime.now(timezone.utc).timestamp(),
+        ),
+        args.state_file,
+    )
     Path(args.log_file).unlink(missing_ok=True)
-    _log(f"Book M live state reset: bankroll_cap=${cap:,.2f}  state_file={args.state_file}")
+    _log(f"Book M live state reset: bankroll_cap=${cap:,.2f}  cash=${cash:,.2f}  state_file={args.state_file}")
 
 
 def cmd_make_live_preflight(args: argparse.Namespace) -> None:
@@ -797,6 +826,14 @@ def cmd_make_live_run(args: argparse.Namespace) -> None:
                 notifier.log(_report_line(report, state))
                 for e in report.errors[:5]:
                     notifier.log(f"  error: {e}")
+                # `make live tick` has always logged these; the run loop did
+                # not, so a tick that quoted nothing left no record of why.
+                # That gap is why the 2026-08-31 log cannot explain five
+                # consecutive placed=0 cancelled=0 ticks while a resting bid
+                # was being run over.
+                if report.skipped:
+                    ranked = sorted(report.skipped.items(), key=lambda kv: -kv[1])
+                    notifier.log(f"  skipped: {', '.join(f'{k}={v}' for k, v in ranked)}")
                 if state.halted:
                     # task item 6: page the moment a halt trips, not one full
                     # --interval late (the old code only re-checked
@@ -996,6 +1033,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_lreset.add_argument("--state-file", default=MAKING_LIVE_STATE_FILE)
     p_lreset.add_argument("--log-file", default=MAKING_LIVE_DECISION_LOG_FILE)
     p_lreset.add_argument("--bankroll-cap", type=float, default=None)
+    p_lreset.add_argument(
+        "--cash",
+        type=float,
+        default=None,
+        help="starting cash to seed (default: the bankroll cap). Pass the real USDC balance from "
+        "`make live preflight` when resetting after a drift incident, so the fresh state starts "
+        "from what the wallet actually holds.",
+    )
     p_lreset.set_defaults(func=cmd_make_live_reset)
 
     p_lrun = live_sub.add_parser("run", help="tick forever on an interval, Ctrl+C to stop")
